@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import {
   getAllOrders,
   getAllCustomers,
@@ -358,6 +359,7 @@ export default async function Home() {
   let customerError = "";
   let metaError = "";
   let metaDailyBudget = 0;
+  let metaSalesTrackedToday = 0;
 
   let metaSpend: SpendSnapshot = {
     today: 0,
@@ -386,9 +388,12 @@ export default async function Home() {
     const metaData = await getMetaSnapshot();
     metaSpend = metaData.spend;
     metaDailyBudget = metaData.dailyBudget;
+    metaSalesTrackedToday = metaData.salesTrackedToday;
   } catch (error) {
     metaError = error instanceof Error ? error.message : "Unknown Meta error";
   }
+
+  const todayKey = getDateKey(new Date());
 
   const todayOrders = filterOrdersByDateKeys(orders, buildRecentDateKeySet(1));
   const sevenDayOrders = filterOrdersByDateKeys(
@@ -579,6 +584,9 @@ export default async function Home() {
   );
 
   const recentOrders = [...orders].slice(0, 10);
+  const firstNonTodayRecentOrderIndex = recentOrders.findIndex(
+    (order) => getDateKey(order.createdAt) !== todayKey
+  );
 
   return (
     <main className="min-h-screen bg-zinc-950 text-white">
@@ -676,6 +684,10 @@ export default async function Home() {
             value={metaError ? "—" : money(metaSpend.today)}
             lines={[
               {
+                label: "Sales Tracked",
+                value: metaError ? "—" : String(metaSalesTrackedToday),
+              },
+              {
                 label: "Daily Budget",
                 value: money(metaDailyBudget),
               },
@@ -709,6 +721,10 @@ export default async function Home() {
             value={ratio(psmValues.today)}
             valueClassName={todayPsmStatus.color}
             lines={[
+              {
+                label: "Yesterday",
+                value: ratio(psmValues.yesterday),
+              },
               {
                 label: "7D",
                 value: ratio(psmValues.sevenDay),
@@ -852,10 +868,10 @@ export default async function Home() {
           <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
             <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
               <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                Total Customers
+                Total Orders
               </p>
               <p className="mt-2 text-2xl font-semibold text-white">
-                {emailValues.total}
+                {orderValues.lifetime}
               </p>
             </div>
 
@@ -955,23 +971,56 @@ export default async function Home() {
                         </td>
                       </tr>
                     ) : (
-                      recentOrders.map((order) => (
-                        <tr key={order.id} className="border-t border-zinc-800">
-                          <td className="px-4 py-4">{order.name}</td>
-                          <td className="px-4 py-4 text-zinc-400">
-                            {order.date}
-                          </td>
-                          <td className="px-4 py-4 text-zinc-400">
-                            {order.country}
-                          </td>
-                          <td className="px-4 py-4 text-zinc-400">
-                            {order.products}
-                          </td>
-                          <td className="px-4 py-4 text-right">
-                            {money(order.revenueAmount)}
-                          </td>
-                        </tr>
-                      ))
+                      recentOrders.map((order, index) => {
+                        const isTodayOrder =
+                          getDateKey(order.createdAt) === todayKey;
+                        const showTodayDivider = index === 0 && isTodayOrder;
+                        const showEarlierDivider =
+                          firstNonTodayRecentOrderIndex !== -1 &&
+                          index === firstNonTodayRecentOrderIndex;
+
+                        return (
+                          <Fragment key={order.id}>
+                            {showTodayDivider ? (
+                              <tr className="border-t border-zinc-800 bg-zinc-950/60">
+                                <td
+                                  className="px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400"
+                                  colSpan={5}
+                                >
+                                  Today
+                                </td>
+                              </tr>
+                            ) : null}
+
+                            {showEarlierDivider ? (
+                              <tr className="border-t border-zinc-800 bg-zinc-950/60">
+                                <td
+                                  className="px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400"
+                                  colSpan={5}
+                                >
+                                  Earlier
+                                </td>
+                              </tr>
+                            ) : null}
+
+                            <tr className="border-t border-zinc-800">
+                              <td className="px-4 py-4">{order.name}</td>
+                              <td className="px-4 py-4 text-zinc-400">
+                                {order.date}
+                              </td>
+                              <td className="px-4 py-4 text-zinc-400">
+                                {order.country}
+                              </td>
+                              <td className="px-4 py-4 text-zinc-400">
+                                {order.products}
+                              </td>
+                              <td className="px-4 py-4 text-right">
+                                {money(order.revenueAmount)}
+                              </td>
+                            </tr>
+                          </Fragment>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
