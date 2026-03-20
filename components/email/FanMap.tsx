@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import * as turf from "@turf/turf";
-import Map, { Layer, Popup, Source, type MapLayerMouseEvent } from "react-map-gl/mapbox";
+import Map, { Layer, Popup, Source, type MapMouseEvent } from "react-map-gl/mapbox";
 import type { CityCluster } from "@/lib/email/audience";
 import "mapbox-gl/dist/mapbox-gl.css";
 
@@ -14,6 +14,15 @@ type Props = {
 };
 
 type SelectedCluster = {
+  city: string;
+  country: string;
+  count: number;
+  shareOfAudience: number;
+  lat: number;
+  lng: number;
+};
+
+type FeatureProperties = {
   city: string;
   country: string;
   count: number;
@@ -78,18 +87,17 @@ export default function FanMap({
     );
   }
 
-  const handleClick = (event: MapLayerMouseEvent) => {
-    const feature = event.features?.[0];
-    if (!feature || feature.geometry.type !== "Point") return;
+  const handleClick = (event: MapMouseEvent) => {
+    const feature = (event.features?.[0] ?? null) as
+      | {
+          geometry?: { type?: string };
+          properties?: FeatureProperties;
+        }
+      | null;
 
-    const props = feature.properties as {
-      city: string;
-      country: string;
-      count: number;
-      shareOfAudience: number;
-      lat: number;
-      lng: number;
-    };
+    if (!feature || feature.geometry?.type !== "Point" || !feature.properties) return;
+
+    const props = feature.properties;
 
     setSelectedCluster({
       city: props.city,
