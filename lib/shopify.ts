@@ -218,18 +218,19 @@ export async function getAllOrders(): Promise<DashboardOrder[]> {
   const allOrders: DashboardOrder[] = [];
 
   while (hasNextPage && pageCount < 25) {
-    const json = await shopifyGraphQLFetch<ShopifyOrdersResponse>(query, {
-      first: 100,
-      after,
-    });
+    const response: ShopifyOrdersResponse =
+      await shopifyGraphQLFetch<ShopifyOrdersResponse>(query, {
+        first: 100,
+        after,
+      });
 
-    if (json.errors && json.errors.length > 0) {
+    if (response.errors && response.errors.length > 0) {
       throw new Error(
-        `Shopify GraphQL error: ${json.errors.map((e) => e.message).join(", ")}`
+        `Shopify GraphQL error: ${response.errors.map((e) => e.message).join(", ")}`
       );
     }
 
-    const connection = json.data?.orders;
+    const connection = response.data?.orders;
 
     if (!connection) {
       break;
@@ -292,18 +293,19 @@ export async function getAllCustomers(): Promise<DashboardCustomer[]> {
   const allCustomers: DashboardCustomer[] = [];
 
   while (hasNextPage && pageCount < 25) {
-    const json = await shopifyGraphQLFetch<ShopifyCustomersResponse>(query, {
-      first: 100,
-      after,
-    });
+    const response: ShopifyCustomersResponse =
+      await shopifyGraphQLFetch<ShopifyCustomersResponse>(query, {
+        first: 100,
+        after,
+      });
 
-    if (json.errors && json.errors.length > 0) {
+    if (response.errors && response.errors.length > 0) {
       throw new Error(
-        `Shopify GraphQL error: ${json.errors.map((e) => e.message).join(", ")}`
+        `Shopify GraphQL error: ${response.errors.map((e) => e.message).join(", ")}`
       );
     }
 
-    const connection = json.data?.customers;
+    const connection = response.data?.customers;
 
     if (!connection) {
       break;
