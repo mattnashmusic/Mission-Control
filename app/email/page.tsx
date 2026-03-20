@@ -103,8 +103,8 @@ export default function EmailPage() {
       setCreatingGroup(true);
 
       const emails = radiusResult.clusters.flatMap(
-        (cluster) => cluster.emails ?? []
-      );
+  (cluster: any) => cluster.emails ?? []
+);
 
       const response = await fetch("/api/email/create-group", {
         method: "POST",
