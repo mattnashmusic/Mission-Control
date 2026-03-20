@@ -7,6 +7,7 @@ export type CityCluster = {
   lng: number;
   count: number;
   shareOfAudience: number;
+  emails?: string[];
 };
 
 export function getAudienceInRadius(
