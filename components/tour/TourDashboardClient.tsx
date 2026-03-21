@@ -168,11 +168,19 @@ const INITIAL_SHOWS: TourShow[] = [
   },
 ];
 
+const TOUR_AD_BUDGET = 12000;
+
 function money(value: number) {
   return new Intl.NumberFormat("en-GB", {
     style: "currency",
     currency: "EUR",
   }).format(value);
+}
+
+function signedMoney(value: number) {
+  if (value > 0) return `+${money(value)}`;
+  if (value < 0) return `-${money(Math.abs(value))}`;
+  return money(0);
 }
 
 function percent(value: number) {
@@ -193,6 +201,14 @@ function calculateShowTotalCost(show: TourShow) {
     show.costs.production +
     show.costs.hotelPetrolMisc +
     show.metaSpend
+  );
+}
+
+function calculateShowBaseCostExcludingAds(show: TourShow) {
+  return (
+    show.costs.venueHire +
+    show.costs.production +
+    show.costs.hotelPetrolMisc
   );
 }
 
@@ -219,6 +235,25 @@ function calculateCostPerTicket(show: TourShow) {
   return show.metaSpend / show.ticketSales;
 }
 
+function KpiCard({
+  title,
+  value,
+  valueClassName = "text-white",
+}: {
+  title: string;
+  value: string;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 p-5">
+      <div className="text-base font-semibold text-zinc-200">{title}</div>
+      <div className={`mt-2 text-3xl font-semibold tracking-tight ${valueClassName}`}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
 export default function TourDashboardClient() {
   const [shows, setShows] = useState<TourShow[]>(INITIAL_SHOWS);
   const [expandedShowId, setExpandedShowId] = useState<string | null>(null);
@@ -233,12 +268,39 @@ export default function TourDashboardClient() {
     const costPerTicket =
       ticketsSoldTotal === 0 ? 0 : adSpendTotal / ticketsSoldTotal;
 
+    const totalTourCosts = shows.reduce(
+      (sum, show) => sum + calculateShowBaseCostExcludingAds(show),
+      0
+    );
+
+    const totalExpectedRevenue = shows.reduce(
+      (sum, show) => sum + show.capacity * show.ticketPrice,
+      0
+    );
+
+    const forecastProfit = totalExpectedRevenue - totalTourCosts;
+
+    const breakEvenPercentOfTour =
+      totalExpectedRevenue === 0 ? 0 : (totalTourCosts / totalExpectedRevenue) * 100;
+
+    const breakEvenTickets =
+      totalCapacity === 0 ? 0 : (breakEvenPercentOfTour / 100) * totalCapacity;
+
+    const ticketsCoveredByAdBudget =
+      costPerTicket === 0 ? 0 : TOUR_AD_BUDGET / costPerTicket;
+
     return {
       upcomingShows,
       ticketsSoldTotal,
       adSpendTotal,
       percentTourSold,
       costPerTicket,
+      totalTourCosts,
+      totalExpectedRevenue,
+      forecastProfit,
+      breakEvenPercentOfTour,
+      breakEvenTickets,
+      ticketsCoveredByAdBudget,
     };
   }, [shows]);
 
@@ -267,39 +329,53 @@ export default function TourDashboardClient() {
         </header>
 
         <section className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 p-5">
-            <div className="text-base font-semibold text-zinc-200">🎫 Upcoming Shows</div>
-            <div className="mt-2 text-3xl font-semibold tracking-tight text-white">
-              {kpis.upcomingShows}
-            </div>
+          <KpiCard title="🎫 Upcoming Shows" value={String(kpis.upcomingShows)} />
+          <KpiCard title="📈 Tickets Sold Total" value={String(kpis.ticketsSoldTotal)} />
+          <KpiCard title="📣 Ad Spend So Far" value={money(kpis.adSpendTotal)} />
+          <KpiCard title="% of Tour Sold" value={percent(kpis.percentTourSold)} />
+          <KpiCard
+            title="💸 Cost Per Ticket"
+            value={kpis.ticketsSoldTotal === 0 ? "—" : money(kpis.costPerTicket)}
+          />
+        </section>
+
+        <section className="mb-8 rounded-3xl border border-zinc-800 bg-zinc-900/90 p-5">
+          <div className="mb-4">
+            <h2 className="text-2xl font-semibold text-white">Tour Economics</h2>
+            <p className="mt-1 text-sm text-zinc-400">
+              Tour-level forecast based on total capacity, ticket prices, and show costs.
+            </p>
           </div>
 
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 p-5">
-            <div className="text-base font-semibold text-zinc-200">📈 Tickets Sold Total</div>
-            <div className="mt-2 text-3xl font-semibold tracking-tight text-white">
-              {kpis.ticketsSoldTotal}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 p-5">
-            <div className="text-base font-semibold text-zinc-200">📣 Ad Spend So Far</div>
-            <div className="mt-2 text-3xl font-semibold tracking-tight text-white">
-              {money(kpis.adSpendTotal)}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 p-5">
-            <div className="text-base font-semibold text-zinc-200">% of Tour Sold</div>
-            <div className="mt-2 text-3xl font-semibold tracking-tight text-white">
-              {percent(kpis.percentTourSold)}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 p-5">
-            <div className="text-base font-semibold text-zinc-200">💸 Cost Per Ticket</div>
-            <div className="mt-2 text-3xl font-semibold tracking-tight text-white">
-              {kpis.ticketsSoldTotal === 0 ? "—" : money(kpis.costPerTicket)}
-            </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+            <KpiCard title="Total Tour Costs" value={money(kpis.totalTourCosts)} />
+            <KpiCard
+              title="Total Expected Revenue"
+              value={money(kpis.totalExpectedRevenue)}
+            />
+            <KpiCard
+              title="Forecast Profit"
+              value={signedMoney(kpis.forecastProfit)}
+              valueClassName={
+                kpis.forecastProfit >= 0 ? "text-emerald-400" : "text-rose-400"
+              }
+            />
+            <KpiCard
+              title="Break-even Tickets"
+              value={kpis.breakEvenTickets.toFixed(0)}
+            />
+            <KpiCard
+              title="Break-even % of Tour"
+              value={percent(kpis.breakEvenPercentOfTour)}
+            />
+            <KpiCard
+              title="Tickets Covered by €12k"
+              value={
+                kpis.costPerTicket === 0
+                  ? "—"
+                  : kpis.ticketsCoveredByAdBudget.toFixed(0)
+              }
+            />
           </div>
         </section>
 
@@ -348,7 +424,9 @@ export default function TourDashboardClient() {
                         <td className="px-4 py-4">{show.city}</td>
                         <td className="px-4 py-4 text-zinc-300">{show.venue}</td>
                         <td className="px-4 py-4 text-right">{show.ticketSales}</td>
-                        <td className="px-4 py-4 text-right text-zinc-400">{show.capacity}</td>
+                        <td className="px-4 py-4 text-right text-zinc-400">
+                          {show.capacity}
+                        </td>
                         <td className="px-4 py-4 text-right">{percent(percentSold)}</td>
                         <td className="px-4 py-4 text-right">{money(show.metaSpend)}</td>
                         <td className="px-4 py-4 text-right">
@@ -405,8 +483,7 @@ export default function TourDashboardClient() {
                                             : "text-rose-400"
                                         }`}
                                       >
-                                        {profitLoss >= 0 ? "+" : "-"}
-                                        {money(Math.abs(profitLoss))}
+                                        {signedMoney(profitLoss)}
                                       </div>
                                     </div>
                                   </div>
@@ -514,6 +591,36 @@ export default function TourDashboardClient() {
                                         updateShow(show.id, (current) => ({
                                           ...current,
                                           ticketSales: Number(e.target.value) || 0,
+                                        }))
+                                      }
+                                      className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
+                                    />
+                                  </label>
+
+                                  <label className="grid gap-2">
+                                    <span className="text-sm text-zinc-400">Capacity</span>
+                                    <input
+                                      type="number"
+                                      value={show.capacity}
+                                      onChange={(e) =>
+                                        updateShow(show.id, (current) => ({
+                                          ...current,
+                                          capacity: Number(e.target.value) || 0,
+                                        }))
+                                      }
+                                      className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
+                                    />
+                                  </label>
+
+                                  <label className="grid gap-2">
+                                    <span className="text-sm text-zinc-400">Ticket Price</span>
+                                    <input
+                                      type="number"
+                                      value={show.ticketPrice}
+                                      onChange={(e) =>
+                                        updateShow(show.id, (current) => ({
+                                          ...current,
+                                          ticketPrice: Number(e.target.value) || 0,
                                         }))
                                       }
                                       className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
