@@ -1,6 +1,11 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { saveShowField, type EditableShowField } from "@/lib/show-client";
+import {
+  saveTourSetting,
+  type EditableTourSettingField,
+} from "@/lib/tour-settings-client";
 
 export type TourShow = {
   id: string;
@@ -25,6 +30,8 @@ type TourSettings = {
   plannedAdBudget: number;
   blendedCpt: number;
 };
+
+type SaveState = "idle" | "saving" | "saved" | "error";
 
 function money(value: number) {
   return new Intl.NumberFormat("en-GB", {
@@ -125,6 +132,13 @@ export default function TourDashboardClient({
   const [blendedCpt, setBlendedCpt] = useState<number>(
     initialSettings.blendedCpt
   );
+  const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({});
+  const [settingsSaveStates, setSettingsSaveStates] = useState<
+    Record<EditableTourSettingField, SaveState>
+  >({
+    plannedAdBudget: "idle",
+    blendedCpt: "idle",
+  });
 
   const kpis = useMemo(() => {
     const upcomingShows = shows.length;
@@ -180,6 +194,94 @@ export default function TourDashboardClient({
     );
   }
 
+  function getSaveKey(showId: string, field: EditableShowField) {
+    return `${showId}:${field}`;
+  }
+
+  async function persistField(
+    showId: string,
+    field: EditableShowField,
+    value: number
+  ) {
+    const key = getSaveKey(showId, field);
+
+    try {
+      setSaveStates((prev) => ({ ...prev, [key]: "saving" }));
+      await saveShowField(showId, field, value);
+      setSaveStates((prev) => ({ ...prev, [key]: "saved" }));
+
+      setTimeout(() => {
+        setSaveStates((prev) => {
+          const next = { ...prev };
+          if (next[key] === "saved") {
+            delete next[key];
+          }
+          return next;
+        });
+      }, 1500);
+    } catch (error) {
+      console.error(error);
+      setSaveStates((prev) => ({ ...prev, [key]: "error" }));
+    }
+  }
+
+  async function persistSetting(
+    field: EditableTourSettingField,
+    value: number
+  ) {
+    try {
+      setSettingsSaveStates((prev) => ({ ...prev, [field]: "saving" }));
+      await saveTourSetting(field, value);
+      setSettingsSaveStates((prev) => ({ ...prev, [field]: "saved" }));
+
+      setTimeout(() => {
+        setSettingsSaveStates((prev) => {
+          if (prev[field] !== "saved") return prev;
+          return { ...prev, [field]: "idle" };
+        });
+      }, 1500);
+    } catch (error) {
+      console.error(error);
+      setSettingsSaveStates((prev) => ({ ...prev, [field]: "error" }));
+    }
+  }
+
+  function renderSaveStatus(showId: string, field: EditableShowField) {
+    const state = saveStates[getSaveKey(showId, field)];
+
+    if (state === "saving") {
+      return <div className="text-xs text-zinc-500">Saving...</div>;
+    }
+
+    if (state === "saved") {
+      return <div className="text-xs text-emerald-400">Saved</div>;
+    }
+
+    if (state === "error") {
+      return <div className="text-xs text-rose-400">Failed to save</div>;
+    }
+
+    return <div className="text-xs text-transparent">.</div>;
+  }
+
+  function renderSettingSaveStatus(field: EditableTourSettingField) {
+    const state = settingsSaveStates[field];
+
+    if (state === "saving") {
+      return <div className="text-xs text-zinc-500">Saving...</div>;
+    }
+
+    if (state === "saved") {
+      return <div className="text-xs text-emerald-400">Saved</div>;
+    }
+
+    if (state === "error") {
+      return <div className="text-xs text-rose-400">Failed to save</div>;
+    }
+
+    return <div className="text-xs text-transparent">.</div>;
+  }
+
   return (
     <main className="min-h-screen bg-zinc-950 text-white">
       <div className="mx-auto max-w-[1600px] px-6 py-10">
@@ -221,8 +323,15 @@ export default function TourDashboardClient({
                 type="number"
                 value={plannedAdBudget}
                 onChange={(e) => setPlannedAdBudget(Number(e.target.value) || 0)}
+                onBlur={(e) =>
+                  persistSetting(
+                    "plannedAdBudget",
+                    Number(e.target.value) || 0
+                  )
+                }
                 className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
               />
+              {renderSettingSaveStatus("plannedAdBudget")}
             </label>
 
             <label className="grid gap-2 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
@@ -231,8 +340,15 @@ export default function TourDashboardClient({
                 type="number"
                 value={blendedCpt}
                 onChange={(e) => setBlendedCpt(Number(e.target.value) || 0)}
+                onBlur={(e) =>
+                  persistSetting(
+                    "blendedCpt",
+                    Number(e.target.value) || 0
+                  )
+                }
                 className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
               />
+              {renderSettingSaveStatus("blendedCpt")}
             </label>
 
             <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
@@ -416,8 +532,16 @@ export default function TourDashboardClient({
                                           },
                                         }))
                                       }
+                                      onBlur={(e) =>
+                                        persistField(
+                                          show.id,
+                                          "venueHire",
+                                          Number(e.target.value) || 0
+                                        )
+                                      }
                                       className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
                                     />
+                                    {renderSaveStatus(show.id, "venueHire")}
                                   </label>
 
                                   <label className="grid gap-2">
@@ -434,8 +558,16 @@ export default function TourDashboardClient({
                                           },
                                         }))
                                       }
+                                      onBlur={(e) =>
+                                        persistField(
+                                          show.id,
+                                          "production",
+                                          Number(e.target.value) || 0
+                                        )
+                                      }
                                       className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
                                     />
+                                    {renderSaveStatus(show.id, "production")}
                                   </label>
 
                                   <label className="grid gap-2">
@@ -454,8 +586,16 @@ export default function TourDashboardClient({
                                           },
                                         }))
                                       }
+                                      onBlur={(e) =>
+                                        persistField(
+                                          show.id,
+                                          "hotelPetrolMisc",
+                                          Number(e.target.value) || 0
+                                        )
+                                      }
                                       className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
                                     />
+                                    {renderSaveStatus(show.id, "hotelPetrolMisc")}
                                   </label>
 
                                   <label className="grid gap-2">
@@ -469,8 +609,16 @@ export default function TourDashboardClient({
                                           metaSpend: Number(e.target.value) || 0,
                                         }))
                                       }
+                                      onBlur={(e) =>
+                                        persistField(
+                                          show.id,
+                                          "metaSpend",
+                                          Number(e.target.value) || 0
+                                        )
+                                      }
                                       className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
                                     />
+                                    {renderSaveStatus(show.id, "metaSpend")}
                                   </label>
 
                                   <label className="grid gap-2">
@@ -484,8 +632,16 @@ export default function TourDashboardClient({
                                           ticketSales: Number(e.target.value) || 0,
                                         }))
                                       }
+                                      onBlur={(e) =>
+                                        persistField(
+                                          show.id,
+                                          "ticketSales",
+                                          Number(e.target.value) || 0
+                                        )
+                                      }
                                       className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
                                     />
+                                    {renderSaveStatus(show.id, "ticketSales")}
                                   </label>
 
                                   <label className="grid gap-2">
@@ -499,8 +655,16 @@ export default function TourDashboardClient({
                                           capacity: Number(e.target.value) || 0,
                                         }))
                                       }
+                                      onBlur={(e) =>
+                                        persistField(
+                                          show.id,
+                                          "capacity",
+                                          Number(e.target.value) || 0
+                                        )
+                                      }
                                       className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
                                     />
+                                    {renderSaveStatus(show.id, "capacity")}
                                   </label>
 
                                   <label className="grid gap-2">
@@ -514,8 +678,16 @@ export default function TourDashboardClient({
                                           ticketPrice: Number(e.target.value) || 0,
                                         }))
                                       }
+                                      onBlur={(e) =>
+                                        persistField(
+                                          show.id,
+                                          "ticketPrice",
+                                          Number(e.target.value) || 0
+                                        )
+                                      }
                                       className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
                                     />
+                                    {renderSaveStatus(show.id, "ticketPrice")}
                                   </label>
 
                                   <div className="mt-3 space-y-3 rounded-2xl border border-zinc-800 bg-zinc-950/60 p-4">
