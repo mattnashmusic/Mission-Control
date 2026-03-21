@@ -2,8 +2,9 @@
 
 import React, { useMemo, useState } from "react";
 
-type TourShow = {
+export type TourShow = {
   id: string;
+  slug: string;
   date: string;
   city: string;
   country: string;
@@ -12,161 +13,18 @@ type TourShow = {
   ticketPrice: number;
   ticketSales: number;
   metaSpend: number;
-  notes?: string;
+  notes?: string | null;
   costs: {
     venueHire: number;
     production: number;
     hotelPetrolMisc: number;
-    adSpendPlanned: number;
   };
 };
 
-const INITIAL_SHOWS: TourShow[] = [
-  {
-    id: "hamburg",
-    date: "2026-11-20",
-    city: "Hamburg",
-    country: "DE",
-    venue: "Monkeys Music Club",
-    capacity: 350,
-    ticketPrice: 22,
-    ticketSales: 0,
-    metaSpend: 0,
-    notes: "Fri or Sat",
-    costs: {
-      venueHire: 1600,
-      production: 500,
-      hotelPetrolMisc: 250,
-      adSpendPlanned: 1500,
-    },
-  },
-  {
-    id: "berlin",
-    date: "2026-11-22",
-    city: "Berlin",
-    country: "DE",
-    venue: "Badehaus",
-    capacity: 200,
-    ticketPrice: 22,
-    ticketSales: 0,
-    metaSpend: 0,
-    notes: "Sun",
-    costs: {
-      venueHire: 725,
-      production: 500,
-      hotelPetrolMisc: 250,
-      adSpendPlanned: 1500,
-    },
-  },
-  {
-    id: "munich",
-    date: "2026-11-23",
-    city: "Munich",
-    country: "DE",
-    venue: "Fierwerk / Orangehaus",
-    capacity: 200,
-    ticketPrice: 22,
-    ticketSales: 0,
-    metaSpend: 0,
-    notes: "Mon",
-    costs: {
-      venueHire: 875,
-      production: 500,
-      hotelPetrolMisc: 250,
-      adSpendPlanned: 1500,
-    },
-  },
-  {
-    id: "zurich",
-    date: "2026-11-24",
-    city: "Zurich",
-    country: "CH",
-    venue: "Xtra Cafe",
-    capacity: 140,
-    ticketPrice: 25,
-    ticketSales: 0,
-    metaSpend: 0,
-    notes: "Tues",
-    costs: {
-      venueHire: 240,
-      production: 500,
-      hotelPetrolMisc: 250,
-      adSpendPlanned: 1500,
-    },
-  },
-  {
-    id: "cologne",
-    date: "2026-11-26",
-    city: "Cologne",
-    country: "DE",
-    venue: "Yuca",
-    capacity: 270,
-    ticketPrice: 22,
-    ticketSales: 0,
-    metaSpend: 0,
-    notes: "Thurs",
-    costs: {
-      venueHire: 1204,
-      production: 500,
-      hotelPetrolMisc: 250,
-      adSpendPlanned: 1500,
-    },
-  },
-  {
-    id: "brussels",
-    date: "2026-11-27",
-    city: "Brussels",
-    country: "BE",
-    venue: "Pilar",
-    capacity: 300,
-    ticketPrice: 22,
-    ticketSales: 0,
-    metaSpend: 0,
-    notes: "Fri or Sat both Reserved",
-    costs: {
-      venueHire: 1385,
-      production: 500,
-      hotelPetrolMisc: 250,
-      adSpendPlanned: 1500,
-    },
-  },
-  {
-    id: "nijmegen",
-    date: "2026-12-01",
-    city: "Nijmegen",
-    country: "NL",
-    venue: "Merleyn",
-    capacity: 180,
-    ticketPrice: 20,
-    ticketSales: 0,
-    metaSpend: 0,
-    notes: "Tuesday",
-    costs: {
-      venueHire: 0,
-      production: 0,
-      hotelPetrolMisc: 150,
-      adSpendPlanned: 1500,
-    },
-  },
-  {
-    id: "amsterdam",
-    date: "2026-12-04",
-    city: "Amsterdam",
-    country: "NL",
-    venue: "Toekomst",
-    capacity: 350,
-    ticketPrice: 22,
-    ticketSales: 0,
-    metaSpend: 0,
-    notes: "Thurs",
-    costs: {
-      venueHire: 500,
-      production: 500,
-      hotelPetrolMisc: 0,
-      adSpendPlanned: 1500,
-    },
-  },
-];
+type TourSettings = {
+  plannedAdBudget: number;
+  blendedCpt: number;
+};
 
 function money(value: number) {
   return new Intl.NumberFormat("en-GB", {
@@ -252,11 +110,21 @@ function KpiCard({
   );
 }
 
-export default function TourDashboardClient() {
-  const [shows, setShows] = useState<TourShow[]>(INITIAL_SHOWS);
+export default function TourDashboardClient({
+  initialShows,
+  initialSettings,
+}: {
+  initialShows: TourShow[];
+  initialSettings: TourSettings;
+}) {
+  const [shows, setShows] = useState<TourShow[]>(initialShows);
   const [expandedShowId, setExpandedShowId] = useState<string | null>(null);
-  const [plannedAdBudget, setPlannedAdBudget] = useState<number>(12000);
-  const [blendedCpt, setBlendedCpt] = useState<number>(8);
+  const [plannedAdBudget, setPlannedAdBudget] = useState<number>(
+    initialSettings.plannedAdBudget
+  );
+  const [blendedCpt, setBlendedCpt] = useState<number>(
+    initialSettings.blendedCpt
+  );
 
   const kpis = useMemo(() => {
     const upcomingShows = shows.length;
