@@ -13,7 +13,7 @@ export default async function TourPage() {
     }),
   ]);
 
-  const initialShows: TourShow[] = shows.map((show) => ({
+  const initialShows: TourShow[] = shows.map((show: (typeof shows)[number]) => ({
     id: show.id,
     slug: show.slug,
     date: show.date.toISOString(),
