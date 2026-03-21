@@ -168,8 +168,6 @@ const INITIAL_SHOWS: TourShow[] = [
   },
 ];
 
-const TOUR_AD_BUDGET = 12000;
-
 function money(value: number) {
   return new Intl.NumberFormat("en-GB", {
     style: "currency",
@@ -257,6 +255,8 @@ function KpiCard({
 export default function TourDashboardClient() {
   const [shows, setShows] = useState<TourShow[]>(INITIAL_SHOWS);
   const [expandedShowId, setExpandedShowId] = useState<string | null>(null);
+  const [plannedAdBudget, setPlannedAdBudget] = useState<number>(12000);
+  const [blendedCpt, setBlendedCpt] = useState<number>(8);
 
   const kpis = useMemo(() => {
     const upcomingShows = shows.length;
@@ -268,26 +268,25 @@ export default function TourDashboardClient() {
     const costPerTicket =
       ticketsSoldTotal === 0 ? 0 : adSpendTotal / ticketsSoldTotal;
 
-    const totalTourCosts = shows.reduce(
+    const totalTourBaseCosts = shows.reduce(
       (sum, show) => sum + calculateShowBaseCostExcludingAds(show),
       0
     );
 
-    const totalExpectedRevenue = shows.reduce(
-      (sum, show) => sum + show.capacity * show.ticketPrice,
-      0
-    );
+    const totalTourCosts = totalTourBaseCosts + plannedAdBudget;
 
-    const forecastProfit = totalExpectedRevenue - totalTourCosts;
+    const weightedAverageTicketPrice =
+      totalCapacity === 0
+        ? 0
+        : shows.reduce((sum, show) => sum + show.capacity * show.ticketPrice, 0) /
+          totalCapacity;
 
-    const breakEvenPercentOfTour =
-      totalExpectedRevenue === 0 ? 0 : (totalTourCosts / totalExpectedRevenue) * 100;
+    const forecastTicketsSold =
+      blendedCpt === 0 ? 0 : plannedAdBudget / blendedCpt;
 
-    const breakEvenTickets =
-      totalCapacity === 0 ? 0 : (breakEvenPercentOfTour / 100) * totalCapacity;
+    const expectedRevenue = forecastTicketsSold * weightedAverageTicketPrice;
 
-    const ticketsCoveredByAdBudget =
-      costPerTicket === 0 ? 0 : TOUR_AD_BUDGET / costPerTicket;
+    const forecastProfit = expectedRevenue - totalTourCosts;
 
     return {
       upcomingShows,
@@ -295,14 +294,14 @@ export default function TourDashboardClient() {
       adSpendTotal,
       percentTourSold,
       costPerTicket,
+      totalTourBaseCosts,
       totalTourCosts,
-      totalExpectedRevenue,
+      weightedAverageTicketPrice,
+      forecastTicketsSold,
+      expectedRevenue,
       forecastProfit,
-      breakEvenPercentOfTour,
-      breakEvenTickets,
-      ticketsCoveredByAdBudget,
     };
-  }, [shows]);
+  }, [shows, plannedAdBudget, blendedCpt]);
 
   function updateShow(
     showId: string,
@@ -340,40 +339,64 @@ export default function TourDashboardClient() {
         </section>
 
         <section className="mb-8 rounded-3xl border border-zinc-800 bg-zinc-900/90 p-5">
-          <div className="mb-4">
+          <div className="mb-5">
             <h2 className="text-2xl font-semibold text-white">Tour Economics</h2>
             <p className="mt-1 text-sm text-zinc-400">
-              Tour-level forecast based on total capacity, ticket prices, and show costs.
+              Editable planning assumptions for forecasting revenue and profit across the tour.
             </p>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+          <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="grid gap-2 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
+              <span className="text-sm text-zinc-400">Planned Ad Budget</span>
+              <input
+                type="number"
+                value={plannedAdBudget}
+                onChange={(e) => setPlannedAdBudget(Number(e.target.value) || 0)}
+                className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
+              />
+            </label>
+
+            <label className="grid gap-2 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
+              <span className="text-sm text-zinc-400">Blended CPT</span>
+              <input
+                type="number"
+                value={blendedCpt}
+                onChange={(e) => setBlendedCpt(Number(e.target.value) || 0)}
+                className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
+              />
+            </label>
+
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
+              <div className="text-sm text-zinc-400">Weighted Avg Ticket Price</div>
+              <div className="mt-2 text-2xl font-semibold text-white">
+                {money(kpis.weightedAverageTicketPrice)}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
+              <div className="text-sm text-zinc-400">Base Tour Costs</div>
+              <div className="mt-2 text-2xl font-semibold text-white">
+                {money(kpis.totalTourBaseCosts)}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <KpiCard title="Total Tour Costs" value={money(kpis.totalTourCosts)} />
             <KpiCard
-              title="Total Expected Revenue"
-              value={money(kpis.totalExpectedRevenue)}
+              title="Forecast Tickets Sold"
+              value={kpis.forecastTicketsSold.toFixed(0)}
+            />
+            <KpiCard
+              title="Expected Revenue"
+              value={money(kpis.expectedRevenue)}
             />
             <KpiCard
               title="Forecast Profit"
               value={signedMoney(kpis.forecastProfit)}
               valueClassName={
                 kpis.forecastProfit >= 0 ? "text-emerald-400" : "text-rose-400"
-              }
-            />
-            <KpiCard
-              title="Break-even Tickets"
-              value={kpis.breakEvenTickets.toFixed(0)}
-            />
-            <KpiCard
-              title="Break-even % of Tour"
-              value={percent(kpis.breakEvenPercentOfTour)}
-            />
-            <KpiCard
-              title="Tickets Covered by €12k"
-              value={
-                kpis.costPerTicket === 0
-                  ? "—"
-                  : kpis.ticketsCoveredByAdBudget.toFixed(0)
               }
             />
           </div>
