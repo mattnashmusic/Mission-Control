@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import { prisma } from "@/lib/prisma";
 import { type DashboardCustomer } from "@/lib/shopify";
+import { getMetaSnapshot } from "@/lib/meta";
 import { calculateShippingCost } from "@/utils/shipping";
 import { getProductCost } from "@/utils/cogs";
 import SyncButton from "@/components/SyncButton";
@@ -282,10 +283,6 @@ function daysBetweenInclusive(start: Date, end: Date) {
   );
 }
 
-function sumNumbers(values: number[]) {
-  return values.reduce((sum, value) => sum + value, 0);
-}
-
 function TodayCard({
   title,
   emoji,
@@ -306,7 +303,7 @@ function TodayCard({
       </div>
 
       <div
-        className={`text-3xl font-semibold tracking-tight ${valueClassName}`}
+        className={`text-3xl font-semibold tracking-tight tabular-nums ${valueClassName}`}
       >
         {value}
       </div>
@@ -319,7 +316,7 @@ function TodayCard({
           >
             <span className="text-sm text-zinc-400">{line.label}</span>
             <span
-              className={`text-sm font-medium ${
+              className={`text-sm font-medium tabular-nums ${
                 line.valueClassName ?? "text-zinc-200"
               }`}
             >
@@ -351,28 +348,28 @@ function PerformanceRow({
     <tr className="border-t border-zinc-800">
       <td className="px-4 py-4 text-sm font-medium text-zinc-200">{label}</td>
       <td
-        className={`px-4 py-4 text-right text-sm ${
+        className={`px-4 py-4 text-right text-sm tabular-nums ${
           emphasize ? "font-semibold text-white" : "text-zinc-300"
         }`}
       >
         {yesterday}
       </td>
       <td
-        className={`px-4 py-4 text-right text-sm ${
+        className={`px-4 py-4 text-right text-sm tabular-nums ${
           emphasize ? "font-semibold text-white" : "text-zinc-300"
         }`}
       >
         {sevenDay}
       </td>
       <td
-        className={`px-4 py-4 text-right text-sm ${
+        className={`px-4 py-4 text-right text-sm tabular-nums ${
           emphasize ? "font-semibold text-white" : "text-zinc-300"
         }`}
       >
         {thirtyDay}
       </td>
       <td
-        className={`px-4 py-4 text-right text-sm ${
+        className={`px-4 py-4 text-right text-sm tabular-nums ${
           emphasize ? "font-semibold text-white" : "text-zinc-300"
         }`}
       >
@@ -382,13 +379,33 @@ function PerformanceRow({
   );
 }
 
+function BottomStatCard({
+  label,
+  value,
+  valueClassName = "text-white",
+}: {
+  label: string;
+  value: string | number;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="flex h-full min-h-[124px] flex-col justify-between rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
+      <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+        {label}
+      </p>
+      <p className={`mt-4 text-2xl font-semibold tabular-nums ${valueClassName}`}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
 export default async function Home() {
   let orders: DashboardOrder[] = [];
   let customers: DashboardCustomer[] = [];
   let shopifyError = "";
   let customerError = "";
   let metaError = "";
-  const metaDailyBudget: number | null = null;
 
   let metaSpend: SpendSnapshot = {
     today: 0,
@@ -405,6 +422,8 @@ export default async function Home() {
     thirtyDay: 0,
     lifetime: 0,
   };
+
+  let metaDailyBudget: number | null = null;
 
   const lastSync = await prisma.syncLog.findFirst({
     where: {
@@ -488,45 +507,25 @@ export default async function Home() {
   }
 
   try {
-    const metaRows = await prisma.metaDaily.findMany({
-      orderBy: {
-        date: "desc",
-      },
-    });
-
-    const rowMap = new Map(metaRows.map((row) => [getDateKey(row.date), row]));
-
-    const todayKey = getDateKey(new Date());
-    const yesterdayKey = shiftDateKey(new Date(), 1);
-    const sevenDayKeys = [...buildRecentDateKeySet(7)];
-    const thirtyDayKeys = [...buildRecentDateKeySet(30)];
-
-    const todayRow = rowMap.get(todayKey);
-    const yesterdayRow = rowMap.get(yesterdayKey);
-
-    const sevenDayRows = sevenDayKeys
-      .map((key) => rowMap.get(key))
-      .filter((row): row is NonNullable<typeof row> => Boolean(row));
-
-    const thirtyDayRows = thirtyDayKeys
-      .map((key) => rowMap.get(key))
-      .filter((row): row is NonNullable<typeof row> => Boolean(row));
+    const meta = await getMetaSnapshot();
 
     metaSpend = {
-      today: todayRow?.spend ?? 0,
-      yesterday: yesterdayRow?.spend ?? 0,
-      sevenDay: sumNumbers(sevenDayRows.map((row) => row.spend)),
-      thirtyDay: sumNumbers(thirtyDayRows.map((row) => row.spend)),
-      lifetime: sumNumbers(metaRows.map((row) => row.spend)),
+      today: meta.spend.today,
+      yesterday: meta.spend.yesterday,
+      sevenDay: meta.spend.sevenDay,
+      thirtyDay: meta.spend.thirtyDay,
+      lifetime: meta.spend.lifetime,
     };
 
     metaPurchases = {
-      today: todayRow?.purchases ?? 0,
-      yesterday: yesterdayRow?.purchases ?? 0,
-      sevenDay: sumNumbers(sevenDayRows.map((row) => row.purchases)),
-      thirtyDay: sumNumbers(thirtyDayRows.map((row) => row.purchases)),
-      lifetime: sumNumbers(metaRows.map((row) => row.purchases)),
+      today: meta.salesTrackedToday,
+      yesterday: 0,
+      sevenDay: 0,
+      thirtyDay: 0,
+      lifetime: 0,
     };
+
+    metaDailyBudget = meta.dailyBudget;
   } catch (error) {
     metaError = error instanceof Error ? error.message : "Unknown Meta error";
   }
@@ -728,49 +727,49 @@ export default async function Home() {
 
   return (
     <main className="min-h-screen bg-zinc-950 text-white">
-      <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col px-6 py-10">
+      <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col px-4 py-6 sm:px-6 sm:py-10">
         <header className="mb-10">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-            <div>
-              <p className="mb-2 text-sm uppercase tracking-[0.25em] text-zinc-500">
-                FSH Dashboard
-              </p>
-              <h1 className="text-5xl font-semibold tracking-tight text-white">
-                🎣 FSH Dashboard
-              </h1>
-              <p className="mt-3 max-w-3xl text-lg text-zinc-400">
-                Clean overview of revenue, orders, spend, costs, and net profit.
-              </p>
-              <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-zinc-400">
-                <span>Running for {daysRunning} days</span>
-                <span>Started {FSH_START_DATE}</span>
-              </div>
-            </div>
+  <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+    <div className="min-w-0 flex-1">
+      <p className="mb-2 text-sm uppercase tracking-[0.25em] text-zinc-500">
+        FSH Dashboard
+      </p>
+      <h1 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">
+        🎣 FSH Dashboard
+      </h1>
+      <p className="mt-3 max-w-3xl text-base text-zinc-400 sm:text-lg">
+        Clean overview of revenue, orders, spend, costs, and net profit.
+      </p>
+      <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-zinc-400">
+        <span>Running for {daysRunning} days</span>
+        <span>Started {FSH_START_DATE}</span>
+      </div>
+    </div>
 
-            <div className="flex flex-col items-start gap-4 xl:items-end">
-              <div className="flex flex-col items-start xl:items-end">
-                <SyncButton />
-                <span className="mt-1 text-xs text-zinc-500">
-                  Last synced: {formatLastSynced(lastSync?.finishedAt ?? null)}
-                </span>
-              </div>
+    <div className="flex w-full flex-col gap-4 lg:w-[320px] lg:min-w-[320px] lg:max-w-[320px] lg:flex-none">
+      <div className="flex flex-col items-start lg:items-end">
+        <SyncButton />
+        <span className="mt-1 text-xs text-zinc-500">
+          Last synced: {formatLastSynced(lastSync?.finishedAt ?? null)}
+        </span>
+      </div>
 
-              <div className="min-w-[240px] rounded-2xl border border-zinc-800 bg-zinc-900/90 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                  Emails Collected ✉️
-                </div>
-                <div className="mt-2 text-3xl font-semibold tracking-tight text-white">
-                  {emailValues.total}
-                </div>
-                <div className="mt-2 text-sm text-zinc-400">
-                  {emailValues.today} today · {emailValues.thirtyDay} last 30d
-                </div>
-              </div>
-            </div>
-          </div>
-        </header>
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 p-4 lg:ml-auto lg:w-[320px]">
+        <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+          Emails Collected ✉️
+        </div>
+        <div className="mt-2 text-3xl font-semibold tracking-tight tabular-nums text-white">
+          {emailValues.total}
+        </div>
+        <div className="mt-2 text-sm text-zinc-400">
+          {emailValues.today} today · {emailValues.thirtyDay} last 30d
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
 
-        <section className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <section className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <TodayCard
             title="Revenue"
             emoji="💸"
@@ -836,7 +835,10 @@ export default async function Home() {
               },
               {
                 label: "Daily Budget",
-                value: metaDailyBudget === null ? "—" : money(metaDailyBudget),
+                value:
+                  metaError || metaDailyBudget === null
+                    ? "—"
+                    : money(metaDailyBudget),
               },
             ]}
           />
@@ -898,8 +900,8 @@ export default async function Home() {
             </p>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-zinc-800">
-            <table className="w-full text-left">
+          <div className="overflow-x-auto rounded-2xl border border-zinc-800">
+            <table className="w-full min-w-[760px] text-left">
               <thead className="bg-zinc-800/70">
                 <tr>
                   <th className="px-4 py-3 text-sm font-medium text-zinc-300">
@@ -977,7 +979,9 @@ export default async function Home() {
                       : money(metaValues.yesterday)
                   }
                   sevenDay={
-                    metaValues.sevenDay === null ? "—" : money(metaValues.sevenDay)
+                    metaValues.sevenDay === null
+                      ? "—"
+                      : money(metaValues.sevenDay)
                   }
                   thirtyDay={
                     metaValues.thirtyDay === null
@@ -1013,65 +1017,40 @@ export default async function Home() {
           </div>
 
           <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                Total Orders
-              </p>
-              <p className="mt-2 text-2xl font-semibold text-white">
-                {orderValues.lifetime}
-              </p>
-            </div>
+            <BottomStatCard
+              label="Total Orders"
+              value={orderValues.lifetime}
+            />
 
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                Lifetime Net Profit
-              </p>
-              <p
-                className={`mt-2 text-2xl font-semibold ${
-                  netProfitValues.lifetime >= 0
-                    ? "text-emerald-400"
-                    : "text-rose-400"
-                }`}
-              >
-                {signedMoney(netProfitValues.lifetime)}
-              </p>
-            </div>
+            <BottomStatCard
+              label="Lifetime Net Profit"
+              value={signedMoney(netProfitValues.lifetime)}
+              valueClassName={
+                netProfitValues.lifetime >= 0
+                  ? "text-emerald-400"
+                  : "text-rose-400"
+              }
+            />
 
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                CD2 Upsell Takers
-              </p>
-              <p className="mt-2 text-2xl font-semibold text-white">
-                {lifetimeCd2Count}
-              </p>
-            </div>
+            <BottomStatCard
+              label="CD2 Upsell Takers"
+              value={lifetimeCd2Count}
+            />
 
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                CD2 Take Rate
-              </p>
-              <p className="mt-2 text-2xl font-semibold text-white">
-                {percent(lifetimeCd2TakeRate)}
-              </p>
-            </div>
+            <BottomStatCard
+              label="CD2 Take Rate"
+              value={percent(lifetimeCd2TakeRate)}
+            />
 
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                Vinyl Upsell Takers
-              </p>
-              <p className="mt-2 text-2xl font-semibold text-white">
-                {lifetimeVinylCount}
-              </p>
-            </div>
+            <BottomStatCard
+              label="Vinyl Upsell Takers"
+              value={lifetimeVinylCount}
+            />
 
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                Vinyl Take Rate
-              </p>
-              <p className="mt-2 text-2xl font-semibold text-white">
-                {percent(lifetimeVinylTakeRate)}
-              </p>
-            </div>
+            <BottomStatCard
+              label="Vinyl Take Rate"
+              value={percent(lifetimeVinylTakeRate)}
+            />
           </div>
         </section>
 
@@ -1091,8 +1070,8 @@ export default async function Home() {
                 {shopifyError}
               </div>
             ) : (
-              <div className="overflow-hidden rounded-2xl border border-zinc-800">
-                <table className="w-full text-left text-sm">
+              <div className="overflow-x-auto rounded-2xl border border-zinc-800">
+                <table className="w-full min-w-[720px] text-left text-sm">
                   <thead className="bg-zinc-800/70 text-zinc-300">
                     <tr>
                       <th className="px-4 py-3 font-medium">Order</th>
@@ -1155,7 +1134,7 @@ export default async function Home() {
                               <td className="px-4 py-4 text-zinc-400">
                                 {order.products}
                               </td>
-                              <td className="px-4 py-4 text-right">
+                              <td className="px-4 py-4 text-right tabular-nums">
                                 {money(order.revenueAmount)}
                               </td>
                             </tr>
@@ -1213,7 +1192,11 @@ export default async function Home() {
                 <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                   Meta
                 </p>
-                <p className="mt-2 text-lg font-medium text-amber-400">
+                <p
+                  className={`mt-2 text-lg font-medium ${
+                    metaError ? "text-amber-400" : "text-emerald-400"
+                  }`}
+                >
                   {metaError ? "Connection issue" : "Connected"}
                 </p>
                 {metaError ? (
