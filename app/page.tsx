@@ -1,10 +1,6 @@
+import SyncButton from "@/components/SyncButton";
 import Link from "next/link";
-import {
-  getAllOrders,
-  getAllCustomers,
-  type DashboardOrder,
-  type DashboardCustomer,
-} from "@/lib/shopify";
+import { prisma } from "@/lib/prisma";
 import { getMetaSnapshot } from "@/lib/meta";
 import { calculateShippingCost } from "@/utils/shipping";
 import { getProductCost } from "@/utils/cogs";
@@ -19,6 +15,20 @@ const NEXT_TOUR_DATE = "2026-11-20";
 const UPCOMING_SHOWS = 8;
 const TICKETS_SOLD = 563;
 
+type DbDashboardOrder = {
+  id: string;
+  createdAt: string;
+  country: string;
+  revenueAmount: number;
+  products: string;
+};
+
+type DbDashboardCustomer = {
+  id: string;
+  createdAt: string;
+  email: string;
+};
+
 function money(value: number) {
   return new Intl.NumberFormat("en-GB", {
     style: "currency",
@@ -28,7 +38,7 @@ function money(value: number) {
 
 function signedMoney(value: number) {
   if (value > 0) return `+${money(value)}`;
-  if (value < 0) return `-${money(value)}`;
+  if (value < 0) return `-${money(Math.abs(value))}`;
   return money(0);
 }
 
@@ -59,14 +69,14 @@ function buildRecentDateKeySet(days: number) {
 }
 
 function filterOrdersByDateKeys(
-  orders: DashboardOrder[],
+  orders: DbDashboardOrder[],
   dateKeys: Set<string>
 ) {
   return orders.filter((order) => dateKeys.has(getDateKey(order.createdAt)));
 }
 
 function filterCustomersByDateKeys(
-  customers: DashboardCustomer[],
+  customers: DbDashboardCustomer[],
   dateKeys: Set<string>
 ) {
   return customers.filter(
@@ -77,7 +87,7 @@ function filterCustomersByDateKeys(
 }
 
 function filterCustomersSince(
-  customers: DashboardCustomer[],
+  customers: DbDashboardCustomer[],
   startDate: Date
 ) {
   return customers.filter((customer) => {
@@ -86,23 +96,23 @@ function filterCustomersSince(
   });
 }
 
-function calculateRevenue(orders: DashboardOrder[]) {
+function calculateRevenue(orders: DbDashboardOrder[]) {
   return orders.reduce((sum, order) => sum + order.revenueAmount, 0);
 }
 
-function calculateShipping(orders: DashboardOrder[]) {
+function calculateShipping(orders: DbDashboardOrder[]) {
   return orders.reduce((sum, order) => {
     return sum + calculateShippingCost(order.country, order.products);
   }, 0);
 }
 
-function calculateCogs(orders: DashboardOrder[]) {
+function calculateCogs(orders: DbDashboardOrder[]) {
   return orders.reduce((sum, order) => {
     return sum + getProductCost(order.products);
   }, 0);
 }
 
-function calculateProcessingFees(orders: DashboardOrder[]) {
+function calculateProcessingFees(orders: DbDashboardOrder[]) {
   return orders.reduce((sum, order) => {
     return (
       sum + order.revenueAmount * PROCESSING_FEE_RATE + PROCESSING_FIXED_FEE
@@ -110,7 +120,7 @@ function calculateProcessingFees(orders: DashboardOrder[]) {
   }, 0);
 }
 
-function calculateNetProfit(orders: DashboardOrder[], metaSpend: number) {
+function calculateNetProfit(orders: DbDashboardOrder[], metaSpend: number) {
   const revenue = calculateRevenue(orders);
   const shipping = calculateShipping(orders);
   const cogs = calculateCogs(orders);
@@ -235,18 +245,46 @@ function HubCard({
 }
 
 export default async function Home() {
-  let orders: DashboardOrder[] = [];
-  let customers: DashboardCustomer[] = [];
+  let orders: DbDashboardOrder[] = [];
+  let customers: DbDashboardCustomer[] = [];
   let metaSpendToday = 0;
 
   try {
-    orders = await getAllOrders();
+    const dbOrders = await prisma.shopifyOrder.findMany({
+      include: {
+        lineItems: true,
+      },
+    });
+
+    orders = dbOrders.map((order) => ({
+      id: order.id,
+      createdAt: order.createdAt.toISOString(),
+      country: order.customerCountryCode || order.customerCountry || "NL",
+      revenueAmount: order.totalPrice,
+      products: order.lineItems
+        .flatMap((item) =>
+          Array.from({ length: Math.max(1, item.quantity) }, () => item.title)
+        )
+        .join(", "),
+    }));
   } catch {
     orders = [];
   }
 
   try {
-    customers = await getAllCustomers();
+    const dbCustomers = await prisma.shopifyCustomer.findMany({
+      select: {
+        id: true,
+        createdAt: true,
+        email: true,
+      },
+    });
+
+    customers = dbCustomers.map((customer) => ({
+      id: customer.id,
+      createdAt: customer.createdAt.toISOString(),
+      email: customer.email ?? "",
+    }));
   } catch {
     customers = [];
   }
@@ -259,10 +297,6 @@ export default async function Home() {
   }
 
   const todayOrders = filterOrdersByDateKeys(orders, buildRecentDateKeySet(1));
-  const thirtyDayOrders = filterOrdersByDateKeys(
-    orders,
-    buildRecentDateKeySet(30)
-  );
 
   const todayRevenue = calculateRevenue(todayOrders);
   const todayNetProfit = calculateNetProfit(todayOrders, metaSpendToday);
@@ -306,6 +340,9 @@ export default async function Home() {
             🚀 Mission Control
           </h1>
           <p className="mt-4 text-lg text-zinc-400">Artist: Matt Nash</p>
+          <div className="mt-6 flex justify-center">
+
+</div>
         </header>
 
         <section className="mx-auto grid w-full max-w-5xl gap-6 md:grid-cols-3">

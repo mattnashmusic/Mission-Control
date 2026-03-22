@@ -38,6 +38,65 @@ model TourSettings {
   updatedAt       DateTime @updatedAt
 }
 
+model ShopifyOrder {
+  id                       String   @id
+  orderNumber              String?
+  name                     String?
+  createdAt                DateTime
+  processedAt              DateTime?
+  currency                 String?
+  financialStatus          String?
+  fulfillmentStatus        String?
+  displayFulfillmentStatus String?
+  email                    String?
+  customerFirstName        String?
+  customerLastName         String?
+  customerCountry          String?
+  customerCountryCode      String?
+  subtotalPrice            Float    @default(0)
+  totalDiscounts           Float    @default(0)
+  totalShipping            Float    @default(0)
+  totalTax                 Float    @default(0)
+  totalPrice               Float    @default(0)
+  tags                     String?
+  rawJson                  Json?
+  syncedAt                 DateTime @default(now())
+  lineItems                ShopifyOrderLineItem[]
+
+  @@index([createdAt])
+  @@index([customerCountryCode])
+}
+
+model ShopifyOrderLineItem {
+  id               String   @id
+  shopifyOrderId   String
+  title            String
+  sku              String?
+  variantTitle     String?
+  quantity         Int      @default(1)
+  price            Float    @default(0)
+  vendor           String?
+  productType      String?
+  requiresShipping Boolean?
+  taxable          Boolean?
+  rawJson          Json?
+
+  shopifyOrder ShopifyOrder @relation(fields: [shopifyOrderId], references: [id], onDelete: Cascade)
+
+  @@index([shopifyOrderId])
+  @@index([sku])
+  @@index([title])
+}
+
+model MetaDaily {
+  date        DateTime @id
+  spend       Float    @default(0)
+  purchases   Int      @default(0)
+  syncedAt    DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 model AppSetting {
   key       String   @id
   value     String

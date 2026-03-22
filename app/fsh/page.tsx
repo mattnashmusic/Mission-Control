@@ -1,13 +1,9 @@
 import { Fragment } from "react";
-import {
-  getAllOrders,
-  getAllCustomers,
-  type DashboardOrder,
-  type DashboardCustomer,
-} from "@/lib/shopify";
-import { getMetaSnapshot } from "@/lib/meta";
+import { prisma } from "@/lib/prisma";
+import { getAllCustomers, type DashboardCustomer } from "@/lib/shopify";
 import { calculateShippingCost } from "@/utils/shipping";
 import { getProductCost } from "@/utils/cogs";
+import SyncButton from "@/components/SyncButton";
 
 const TIME_ZONE = "Europe/Amsterdam";
 const PROCESSING_FEE_RATE = 0.029;
@@ -20,6 +16,24 @@ type SpendSnapshot = {
   sevenDay: number;
   thirtyDay: number;
   lifetime: number;
+};
+
+type PurchasesSnapshot = {
+  today: number;
+  yesterday: number;
+  sevenDay: number;
+  thirtyDay: number;
+  lifetime: number;
+};
+
+type DashboardOrder = {
+  id: string;
+  name: string;
+  date: string;
+  createdAt: string;
+  country: string;
+  products: string;
+  revenueAmount: number;
 };
 
 const PRODUCT_MATCHES = {
@@ -37,7 +51,7 @@ function money(value: number) {
 
 function signedMoney(value: number) {
   if (value > 0) return `+${money(value)}`;
-  if (value < 0) return `-${money(value)}`;
+  if (value < 0) return `-${money(Math.abs(value))}`;
   return money(0);
 }
 
@@ -52,6 +66,18 @@ function signedPercent(value: number) {
 
 function ratio(value: number) {
   return value.toFixed(2);
+}
+
+function formatLastSynced(date: Date | null) {
+  if (!date) return "Never";
+
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: TIME_ZONE,
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function getDateKey(dateLike: string | Date) {
@@ -256,6 +282,10 @@ function daysBetweenInclusive(start: Date, end: Date) {
   );
 }
 
+function sumNumbers(values: number[]) {
+  return values.reduce((sum, value) => sum + value, 0);
+}
+
 function TodayCard({
   title,
   emoji,
@@ -358,8 +388,7 @@ export default async function Home() {
   let shopifyError = "";
   let customerError = "";
   let metaError = "";
-  let metaDailyBudget = 0;
-  let metaSalesTrackedToday = 0;
+  const metaDailyBudget: number | null = null;
 
   let metaSpend: SpendSnapshot = {
     today: 0,
@@ -369,8 +398,56 @@ export default async function Home() {
     lifetime: 0,
   };
 
+  let metaPurchases: PurchasesSnapshot = {
+    today: 0,
+    yesterday: 0,
+    sevenDay: 0,
+    thirtyDay: 0,
+    lifetime: 0,
+  };
+
+  const lastSync = await prisma.syncLog.findFirst({
+    where: {
+      domain: {
+        in: ["sync-all", "cron-sync"],
+      },
+      status: "success",
+    },
+    orderBy: {
+      finishedAt: "desc",
+    },
+  });
+
   try {
-    orders = await getAllOrders();
+    const dbOrders = await prisma.shopifyOrder.findMany({
+      include: {
+        lineItems: true,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    orders = dbOrders.map((order) => ({
+      id: order.id,
+      name: order.name || `#${order.orderNumber || order.id}`,
+      date: new Intl.DateTimeFormat("en-GB", {
+        timeZone: TIME_ZONE,
+        day: "2-digit",
+        month: "2-digit",
+        year: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(order.createdAt),
+      createdAt: order.createdAt.toISOString(),
+      country: order.customerCountryCode || order.customerCountry || "—",
+      products: order.lineItems
+        .flatMap((item) =>
+          Array.from({ length: Math.max(1, item.quantity) }, () => item.title)
+        )
+        .join(", "),
+      revenueAmount: order.totalPrice,
+    }));
   } catch (error) {
     shopifyError =
       error instanceof Error ? error.message : "Unknown Shopify orders error";
@@ -385,10 +462,45 @@ export default async function Home() {
   }
 
   try {
-    const metaData = await getMetaSnapshot();
-    metaSpend = metaData.spend;
-    metaDailyBudget = metaData.dailyBudget;
-    metaSalesTrackedToday = metaData.salesTrackedToday;
+    const metaRows = await prisma.metaDaily.findMany({
+      orderBy: {
+        date: "desc",
+      },
+    });
+
+    const rowMap = new Map(metaRows.map((row) => [getDateKey(row.date), row]));
+
+    const todayKey = getDateKey(new Date());
+    const yesterdayKey = shiftDateKey(new Date(), 1);
+    const sevenDayKeys = [...buildRecentDateKeySet(7)];
+    const thirtyDayKeys = [...buildRecentDateKeySet(30)];
+
+    const todayRow = rowMap.get(todayKey);
+    const yesterdayRow = rowMap.get(yesterdayKey);
+
+    const sevenDayRows = sevenDayKeys
+      .map((key) => rowMap.get(key))
+      .filter((row): row is NonNullable<typeof row> => Boolean(row));
+
+    const thirtyDayRows = thirtyDayKeys
+      .map((key) => rowMap.get(key))
+      .filter((row): row is NonNullable<typeof row> => Boolean(row));
+
+    metaSpend = {
+      today: todayRow?.spend ?? 0,
+      yesterday: yesterdayRow?.spend ?? 0,
+      sevenDay: sumNumbers(sevenDayRows.map((row) => row.spend)),
+      thirtyDay: sumNumbers(thirtyDayRows.map((row) => row.spend)),
+      lifetime: sumNumbers(metaRows.map((row) => row.spend)),
+    };
+
+    metaPurchases = {
+      today: todayRow?.purchases ?? 0,
+      yesterday: yesterdayRow?.purchases ?? 0,
+      sevenDay: sumNumbers(sevenDayRows.map((row) => row.purchases)),
+      thirtyDay: sumNumbers(thirtyDayRows.map((row) => row.purchases)),
+      lifetime: sumNumbers(metaRows.map((row) => row.purchases)),
+    };
   } catch (error) {
     metaError = error instanceof Error ? error.message : "Unknown Meta error";
   }
@@ -396,10 +508,7 @@ export default async function Home() {
   const todayKey = getDateKey(new Date());
 
   const todayOrders = filterOrdersByDateKeys(orders, buildRecentDateKeySet(1));
-  const sevenDayOrders = filterOrdersByDateKeys(
-    orders,
-    buildRecentDateKeySet(7)
-  );
+  const sevenDayOrders = filterOrdersByDateKeys(orders, buildRecentDateKeySet(7));
   const thirtyDayOrders = filterOrdersByDateKeys(
     orders,
     buildRecentDateKeySet(30)
@@ -498,10 +607,7 @@ export default async function Home() {
     todayOrders,
     PRODUCT_MATCHES.tips
   );
-  const todayTipsTakeRate = calculateTakeRate(
-    todayTipsCount,
-    orderValues.today
-  );
+  const todayTipsTakeRate = calculateTakeRate(todayTipsCount, orderValues.today);
 
   const todayTotalProducts = calculateTotalProducts(todayOrders);
 
@@ -609,15 +715,24 @@ export default async function Home() {
               </div>
             </div>
 
-            <div className="min-w-[240px] rounded-2xl border border-zinc-800 bg-zinc-900/90 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                Emails Collected ✉️
+            <div className="flex flex-col items-start gap-4 xl:items-end">
+              <div className="flex flex-col items-start xl:items-end">
+                <SyncButton />
+                <span className="mt-1 text-xs text-zinc-500">
+                  Last synced: {formatLastSynced(lastSync?.finishedAt ?? null)}
+                </span>
               </div>
-              <div className="mt-2 text-3xl font-semibold tracking-tight text-white">
-                {emailValues.total}
-              </div>
-              <div className="mt-2 text-sm text-zinc-400">
-                {emailValues.today} today · {emailValues.thirtyDay} last 30d
+
+              <div className="min-w-[240px] rounded-2xl border border-zinc-800 bg-zinc-900/90 p-4">
+                <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                  Emails Collected ✉️
+                </div>
+                <div className="mt-2 text-3xl font-semibold tracking-tight text-white">
+                  {emailValues.total}
+                </div>
+                <div className="mt-2 text-sm text-zinc-400">
+                  {emailValues.today} today · {emailValues.thirtyDay} last 30d
+                </div>
               </div>
             </div>
           </div>
@@ -685,11 +800,11 @@ export default async function Home() {
             lines={[
               {
                 label: "Sales Tracked",
-                value: metaError ? "—" : String(metaSalesTrackedToday),
+                value: metaError ? "—" : String(metaPurchases.today),
               },
               {
                 label: "Daily Budget",
-                value: money(metaDailyBudget),
+                value: metaDailyBudget === null ? "—" : money(metaDailyBudget),
               },
             ]}
           />
@@ -930,19 +1045,13 @@ export default async function Home() {
 
         <section className="grid gap-5 xl:grid-cols-[2fr_1fr]">
           <div className="rounded-3xl border border-zinc-800 bg-zinc-900/90 p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h3 className="text-2xl font-semibold text-white">
-                  Recent Orders
-                </h3>
-                <p className="text-sm text-zinc-400">
-                  Latest Shopify orders pulled directly into the dashboard.
-                </p>
-              </div>
-
-              <button className="rounded-2xl border border-zinc-700 px-4 py-2 text-sm transition hover:bg-zinc-800">
-                Sync now
-              </button>
+            <div className="mb-4">
+              <h3 className="text-2xl font-semibold text-white">
+                Recent Orders
+              </h3>
+              <p className="text-sm text-zinc-400">
+                Latest Shopify orders pulled directly into the dashboard.
+              </p>
             </div>
 
             {shopifyError ? (
@@ -1040,9 +1149,7 @@ export default async function Home() {
                   Last Synced
                 </p>
                 <p className="mt-2 text-lg font-medium text-zinc-100">
-                  {new Date().toLocaleString("en-GB", {
-                    timeZone: TIME_ZONE,
-                  })}
+                  {formatLastSynced(lastSync?.finishedAt ?? null)}
                 </p>
               </div>
 
