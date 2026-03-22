@@ -1,23 +1,29 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { syncShopifyOrdersToDb } from "@/lib/shopify-sync";
+import {
+  syncShopifyOrdersToDb,
+  syncShopifyCustomersToDb,
+} from "@/lib/shopify-sync";
 import { syncMetaDailyToDb } from "@/lib/meta-sync";
 
 export async function POST() {
   const startedAt = new Date();
 
   try {
-    const [shopifyResult, metaResult] = await Promise.all([
-      syncShopifyOrdersToDb(),
-      syncMetaDailyToDb(),
-    ]);
+    const [shopifyOrdersResult, shopifyCustomersResult, metaResult] =
+      await Promise.all([
+        syncShopifyOrdersToDb(2),
+        syncShopifyCustomersToDb(2),
+        syncMetaDailyToDb(),
+      ]);
 
     await prisma.syncLog.create({
       data: {
         domain: "sync-all",
         status: "success",
         message: JSON.stringify({
-          shopifyResult,
+          shopifyOrdersResult,
+          shopifyCustomersResult,
           metaResult,
         }),
         startedAt,
@@ -27,7 +33,8 @@ export async function POST() {
 
     return NextResponse.json({
       ok: true,
-      shopify: shopifyResult,
+      shopifyOrders: shopifyOrdersResult,
+      shopifyCustomers: shopifyCustomersResult,
       meta: metaResult,
     });
   } catch (error) {

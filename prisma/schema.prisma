@@ -88,6 +88,26 @@ model ShopifyOrderLineItem {
   @@index([title])
 }
 
+model ShopifyCustomer {
+  id               String   @id
+  createdAt        DateTime
+  updatedAtShopify DateTime?
+  email            String?
+  firstName        String?
+  lastName         String?
+  ordersCount      Int      @default(0)
+  totalSpent       Float    @default(0)
+  country          String?
+  countryCode      String?
+  tags             String?
+  rawJson          Json?
+  syncedAt         DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([email])
+  @@index([countryCode])
+}
+
 model MetaDaily {
   date        DateTime @id
   spend       Float    @default(0)

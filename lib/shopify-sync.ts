@@ -22,9 +22,15 @@ type ShopifyOrderApi = {
   current_total_tax?: string | number | null;
   current_total_price?: string | number | null;
   customer?: {
+    id?: number | string | null;
+    created_at?: string | null;
+    updated_at?: string | null;
     first_name?: string | null;
     last_name?: string | null;
     email?: string | null;
+    orders_count?: number | null;
+    total_spent?: string | number | null;
+    tags?: string | null;
     default_address?: {
       country?: string | null;
       country_code?: string | null;
@@ -46,6 +52,22 @@ type ShopifyOrderApi = {
     requires_shipping?: boolean | null;
     taxable?: boolean | null;
   }> | null;
+};
+
+type ShopifyCustomerApi = {
+  id: number | string;
+  created_at: string;
+  updated_at?: string | null;
+  email?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  orders_count?: number | null;
+  total_spent?: string | number | null;
+  tags?: string | null;
+  default_address?: {
+    country?: string | null;
+    country_code?: string | null;
+  } | null;
 };
 
 type TokenResponse = {
@@ -122,19 +144,14 @@ function getCreatedAtMinIso(daysBack: number) {
   return cutoff.toISOString();
 }
 
-async function fetchRecentOrders(daysBack: number = 2): Promise<ShopifyOrderApi[]> {
-  const { shop, accessToken } = await getShopifyAccessToken();
-  const createdAtMin = getCreatedAtMinIso(daysBack);
-
-  const initialUrl =
-    `https://${shop}.myshopify.com/admin/api/2024-10/orders.json` +
-    `?status=any` +
-    `&limit=250` +
-    `&order=created_at desc` +
-    `&created_at_min=${encodeURIComponent(createdAtMin)}`;
+async function fetchPagedResource<T>(
+  initialUrl: string,
+  rootKey: "orders" | "customers"
+): Promise<T[]> {
+  const { accessToken } = await getShopifyAccessToken();
 
   let url = initialUrl;
-  const allOrders: ShopifyOrderApi[] = [];
+  const allItems: T[] = [];
 
   while (url) {
     const response = await fetch(url, {
@@ -147,12 +164,13 @@ async function fetchRecentOrders(daysBack: number = 2): Promise<ShopifyOrderApi[
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`Shopify orders fetch failed: ${response.status} ${text}`);
+      throw new Error(
+        `Shopify ${rootKey} fetch failed: ${response.status} ${text}`
+      );
     }
 
-    const json = (await response.json()) as { orders?: ShopifyOrderApi[] };
-    const orders = json.orders ?? [];
-    allOrders.push(...orders);
+    const json = (await response.json()) as Record<string, T[] | undefined>;
+    allItems.push(...(json[rootKey] ?? []));
 
     const linkHeader = response.headers.get("link");
     if (!linkHeader || !linkHeader.includes('rel="next"')) {
@@ -164,7 +182,88 @@ async function fetchRecentOrders(daysBack: number = 2): Promise<ShopifyOrderApi[
     url = nextMatch?.[1] ?? "";
   }
 
-  return allOrders;
+  return allItems;
+}
+
+async function fetchRecentOrders(
+  daysBack: number = 2
+): Promise<ShopifyOrderApi[]> {
+  const { shop } = getShopifyEnv();
+  const createdAtMin = getCreatedAtMinIso(daysBack);
+
+  const initialUrl =
+    `https://${shop}.myshopify.com/admin/api/2024-10/orders.json` +
+    `?status=any` +
+    `&limit=250` +
+    `&order=created_at desc` +
+    `&created_at_min=${encodeURIComponent(createdAtMin)}`;
+
+  return fetchPagedResource<ShopifyOrderApi>(initialUrl, "orders");
+}
+
+async function fetchRecentCustomers(
+  daysBack: number = 2
+): Promise<ShopifyCustomerApi[]> {
+  const { shop } = getShopifyEnv();
+  const createdAtMin = getCreatedAtMinIso(daysBack);
+
+  const initialUrl =
+    `https://${shop}.myshopify.com/admin/api/2024-10/customers.json` +
+    `?limit=250` +
+    `&order=created_at desc` +
+    `&created_at_min=${encodeURIComponent(createdAtMin)}`;
+
+  return fetchPagedResource<ShopifyCustomerApi>(initialUrl, "customers");
+}
+
+async function fetchAllCustomers(): Promise<ShopifyCustomerApi[]> {
+  const { shop } = getShopifyEnv();
+
+  const initialUrl =
+    `https://${shop}.myshopify.com/admin/api/2024-10/customers.json` +
+    `?limit=250` +
+    `&order=created_at desc`;
+
+  return fetchPagedResource<ShopifyCustomerApi>(initialUrl, "customers");
+}
+
+async function upsertCustomer(customer: ShopifyCustomerApi) {
+  await prisma.shopifyCustomer.upsert({
+    where: { id: String(customer.id) },
+    update: {
+      createdAt: new Date(customer.created_at),
+      updatedAtShopify: customer.updated_at
+        ? new Date(customer.updated_at)
+        : null,
+      email: customer.email ?? null,
+      firstName: customer.first_name ?? null,
+      lastName: customer.last_name ?? null,
+      ordersCount: customer.orders_count ?? 0,
+      totalSpent: toNumber(customer.total_spent),
+      country: customer.default_address?.country ?? null,
+      countryCode: customer.default_address?.country_code ?? null,
+      tags: customer.tags ?? null,
+      rawJson: customer as unknown as object,
+      syncedAt: new Date(),
+    },
+    create: {
+      id: String(customer.id),
+      createdAt: new Date(customer.created_at),
+      updatedAtShopify: customer.updated_at
+        ? new Date(customer.updated_at)
+        : null,
+      email: customer.email ?? null,
+      firstName: customer.first_name ?? null,
+      lastName: customer.last_name ?? null,
+      ordersCount: customer.orders_count ?? 0,
+      totalSpent: toNumber(customer.total_spent),
+      country: customer.default_address?.country ?? null,
+      countryCode: customer.default_address?.country_code ?? null,
+      tags: customer.tags ?? null,
+      rawJson: customer as unknown as object,
+      syncedAt: new Date(),
+    },
+  });
 }
 
 export async function syncShopifyOrdersToDb(daysBack: number = 2) {
@@ -256,9 +355,7 @@ export async function syncShopifyOrdersToDb(daysBack: number = 2) {
 
       ordersUpserted += 1;
 
-      const lineItems = order.line_items ?? [];
-
-      for (const item of lineItems) {
+      for (const item of order.line_items ?? []) {
         await prisma.shopifyOrderLineItem.upsert({
           where: { id: String(item.id) },
           update: {
@@ -315,6 +412,99 @@ export async function syncShopifyOrdersToDb(daysBack: number = 2) {
       data: {
         status: "error",
         message: error instanceof Error ? error.message : "Unknown sync error",
+        finishedAt: new Date(),
+      },
+    });
+
+    throw error;
+  }
+}
+
+export async function syncShopifyCustomersToDb(daysBack: number = 2) {
+  const syncLog = await prisma.syncLog.create({
+    data: {
+      domain: "shopify-customers",
+      status: "running",
+      message: `Starting Shopify customers sync for last ${daysBack} days`,
+    },
+  });
+
+  try {
+    const customers = await fetchRecentCustomers(daysBack);
+
+    let customersUpserted = 0;
+
+    for (const customer of customers) {
+      await upsertCustomer(customer);
+      customersUpserted += 1;
+    }
+
+    await prisma.syncLog.update({
+      where: { id: syncLog.id },
+      data: {
+        status: "success",
+        message: `Synced ${customersUpserted} customers from last ${daysBack} days`,
+        finishedAt: new Date(),
+      },
+    });
+
+    return {
+      ok: true,
+      daysBack,
+      customersUpserted,
+    };
+  } catch (error) {
+    await prisma.syncLog.update({
+      where: { id: syncLog.id },
+      data: {
+        status: "error",
+        message: error instanceof Error ? error.message : "Unknown sync error",
+        finishedAt: new Date(),
+      },
+    });
+
+    throw error;
+  }
+}
+
+export async function backfillShopifyCustomersToDb() {
+  const syncLog = await prisma.syncLog.create({
+    data: {
+      domain: "shopify-customers-backfill",
+      status: "running",
+      message: "Starting full Shopify customers backfill",
+    },
+  });
+
+  try {
+    const customers = await fetchAllCustomers();
+
+    let customersUpserted = 0;
+
+    for (const customer of customers) {
+      await upsertCustomer(customer);
+      customersUpserted += 1;
+    }
+
+    await prisma.syncLog.update({
+      where: { id: syncLog.id },
+      data: {
+        status: "success",
+        message: `Backfilled ${customersUpserted} Shopify customers`,
+        finishedAt: new Date(),
+      },
+    });
+
+    return {
+      ok: true,
+      customersUpserted,
+    };
+  } catch (error) {
+    await prisma.syncLog.update({
+      where: { id: syncLog.id },
+      data: {
+        status: "error",
+        message: error instanceof Error ? error.message : "Unknown backfill error",
         finishedAt: new Date(),
       },
     });

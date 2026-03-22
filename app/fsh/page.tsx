@@ -1,6 +1,6 @@
 import { Fragment } from "react";
 import { prisma } from "@/lib/prisma";
-import { getAllCustomers, type DashboardCustomer } from "@/lib/shopify";
+import { type DashboardCustomer } from "@/lib/shopify";
 import { calculateShippingCost } from "@/utils/shipping";
 import { getProductCost } from "@/utils/cogs";
 import SyncButton from "@/components/SyncButton";
@@ -454,7 +454,33 @@ export default async function Home() {
   }
 
   try {
-    customers = await getAllCustomers();
+    const dbCustomers = await prisma.shopifyCustomer.findMany({
+      select: {
+        id: true,
+        createdAt: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    customers = dbCustomers.map((customer) => ({
+      id: customer.id,
+      email: customer.email?.trim() || "",
+      createdAt: customer.createdAt.toISOString(),
+      date: new Intl.DateTimeFormat("en-GB", {
+        timeZone: TIME_ZONE,
+        day: "2-digit",
+        month: "2-digit",
+        year: "2-digit",
+      }).format(customer.createdAt),
+      name:
+        [customer.firstName ?? "", customer.lastName ?? ""].join(" ").trim() ||
+        "—",
+    }));
   } catch (error) {
     customerError =
       error instanceof Error ? error.message : "Unknown Shopify customers error";
@@ -508,7 +534,10 @@ export default async function Home() {
   const todayKey = getDateKey(new Date());
 
   const todayOrders = filterOrdersByDateKeys(orders, buildRecentDateKeySet(1));
-  const sevenDayOrders = filterOrdersByDateKeys(orders, buildRecentDateKeySet(7));
+  const sevenDayOrders = filterOrdersByDateKeys(
+    orders,
+    buildRecentDateKeySet(7)
+  );
   const thirtyDayOrders = filterOrdersByDateKeys(
     orders,
     buildRecentDateKeySet(30)
@@ -607,7 +636,10 @@ export default async function Home() {
     todayOrders,
     PRODUCT_MATCHES.tips
   );
-  const todayTipsTakeRate = calculateTakeRate(todayTipsCount, orderValues.today);
+  const todayTipsTakeRate = calculateTakeRate(
+    todayTipsCount,
+    orderValues.today
+  );
 
   const todayTotalProducts = calculateTotalProducts(todayOrders);
 
