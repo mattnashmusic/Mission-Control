@@ -283,6 +283,16 @@ function daysBetweenInclusive(start: Date, end: Date) {
   );
 }
 
+function logPerf(label: string, startedAt: number, extra?: Record<string, unknown>) {
+  const durationMs = Date.now() - startedAt;
+  if (extra) {
+    console.log(`[FSH PERF] ${label}: ${durationMs}ms`, extra);
+    return;
+  }
+
+  console.log(`[FSH PERF] ${label}: ${durationMs}ms`);
+}
+
 function TodayCard({
   title,
   emoji,
@@ -401,6 +411,9 @@ function BottomStatCard({
 }
 
 export default async function Home() {
+  const pageStartedAt = Date.now();
+  console.log("[FSH PERF] page render start");
+
   let orders: DashboardOrder[] = [];
   let customers: DashboardCustomer[] = [];
   let shopifyError = "";
@@ -425,6 +438,7 @@ export default async function Home() {
 
   let metaDailyBudget: number | null = null;
 
+  const lastSyncStartedAt = Date.now();
   const lastSync = await prisma.syncLog.findFirst({
     where: {
       domain: {
@@ -436,8 +450,11 @@ export default async function Home() {
       finishedAt: "desc",
     },
   });
+  logPerf("syncLog.findFirst", lastSyncStartedAt);
 
   try {
+    const ordersQueryStartedAt = Date.now();
+
     const dbOrders = await prisma.shopifyOrder.findMany({
       include: {
         lineItems: true,
@@ -446,6 +463,12 @@ export default async function Home() {
         createdAt: "desc",
       },
     });
+
+    logPerf("shopifyOrder.findMany", ordersQueryStartedAt, {
+      rows: dbOrders.length,
+    });
+
+    const mapOrdersStartedAt = Date.now();
 
     orders = dbOrders.map((order) => ({
       id: order.id,
@@ -467,12 +490,20 @@ export default async function Home() {
         .join(", "),
       revenueAmount: order.totalPrice,
     }));
+
+    logPerf("map shopify orders", mapOrdersStartedAt, {
+      mappedRows: orders.length,
+    });
   } catch (error) {
     shopifyError =
       error instanceof Error ? error.message : "Unknown Shopify orders error";
+
+    console.error("[FSH PERF] shopify orders failed", error);
   }
 
   try {
+    const customersQueryStartedAt = Date.now();
+
     const dbCustomers = await prisma.shopifyCustomer.findMany({
       select: {
         id: true,
@@ -485,6 +516,12 @@ export default async function Home() {
         createdAt: "desc",
       },
     });
+
+    logPerf("shopifyCustomer.findMany", customersQueryStartedAt, {
+      rows: dbCustomers.length,
+    });
+
+    const mapCustomersStartedAt = Date.now();
 
     customers = dbCustomers.map((customer) => ({
       id: customer.id,
@@ -500,14 +537,25 @@ export default async function Home() {
         [customer.firstName ?? "", customer.lastName ?? ""].join(" ").trim() ||
         "—",
     }));
+
+    logPerf("map shopify customers", mapCustomersStartedAt, {
+      mappedRows: customers.length,
+    });
   } catch (error) {
     customerError =
       error instanceof Error ? error.message : "Unknown Shopify customers error";
     customers = [];
+    console.error("[FSH PERF] shopify customers failed", error);
   }
 
   try {
+    const metaStartedAt = Date.now();
     const meta = await getMetaSnapshot();
+    logPerf("getMetaSnapshot", metaStartedAt, {
+      spendToday: meta.spend.today,
+      dailyBudget: meta.dailyBudget,
+      salesTrackedToday: meta.salesTrackedToday,
+    });
 
     metaSpend = {
       today: meta.spend.today,
@@ -528,7 +576,10 @@ export default async function Home() {
     metaDailyBudget = meta.dailyBudget;
   } catch (error) {
     metaError = error instanceof Error ? error.message : "Unknown Meta error";
+    console.error("[FSH PERF] meta snapshot failed", error);
   }
+
+  const calculationsStartedAt = Date.now();
 
   const todayKey = getDateKey(new Date());
 
@@ -725,49 +776,65 @@ export default async function Home() {
     (order) => getDateKey(order.createdAt) !== todayKey
   );
 
+  logPerf("dashboard calculations", calculationsStartedAt, {
+    totalOrders: orders.length,
+    totalCustomers: customers.length,
+    todayOrders: todayOrders.length,
+    yesterdayOrders: yesterdayOrders.length,
+    sevenDayOrders: sevenDayOrders.length,
+    thirtyDayOrders: thirtyDayOrders.length,
+    recentOrders: recentOrders.length,
+  });
+
+  logPerf("page render total", pageStartedAt, {
+    shopifyError: shopifyError || null,
+    customerError: customerError || null,
+    metaError: metaError || null,
+  });
+
   return (
     <main className="min-h-screen bg-zinc-950 text-white">
       <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col px-4 py-6 sm:px-6 sm:py-10">
         <header className="mb-10">
-  <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-    <div className="min-w-0 flex-1">
-      <p className="mb-2 text-sm uppercase tracking-[0.25em] text-zinc-500">
-        FSH Dashboard
-      </p>
-      <h1 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-        🎣 FSH Dashboard
-      </h1>
-      <p className="mt-3 max-w-3xl text-base text-zinc-400 sm:text-lg">
-        Clean overview of revenue, orders, spend, costs, and net profit.
-      </p>
-      <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-zinc-400">
-        <span>Running for {daysRunning} days</span>
-        <span>Started {FSH_START_DATE}</span>
-      </div>
-    </div>
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0 flex-1">
+              <p className="mb-2 text-sm uppercase tracking-[0.25em] text-zinc-500">
+                FSH Dashboard
+              </p>
+              <h1 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">
+                🎣 FSH Dashboard
+              </h1>
+              <p className="mt-3 max-w-3xl text-base text-zinc-400 sm:text-lg">
+                Clean overview of revenue, orders, spend, costs, and net profit.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-zinc-400">
+                <span>Running for {daysRunning} days</span>
+                <span>Started {FSH_START_DATE}</span>
+              </div>
+            </div>
 
-    <div className="flex w-full flex-col gap-4 lg:w-[320px] lg:min-w-[320px] lg:max-w-[320px] lg:flex-none">
-      <div className="flex flex-col items-start lg:items-end">
-        <SyncButton />
-        <span className="mt-1 text-xs text-zinc-500">
-          Last synced: {formatLastSynced(lastSync?.finishedAt ?? null)}
-        </span>
-      </div>
+            <div className="flex w-full flex-col gap-4 lg:w-[320px] lg:min-w-[320px] lg:max-w-[320px] lg:flex-none">
+              <div className="flex flex-col items-start lg:items-end">
+                <SyncButton />
+                <span className="mt-1 text-xs text-zinc-500">
+                  Last synced: {formatLastSynced(lastSync?.finishedAt ?? null)}
+                </span>
+              </div>
 
-      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 p-4 lg:ml-auto lg:w-[320px]">
-        <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-          Emails Collected ✉️
-        </div>
-        <div className="mt-2 text-3xl font-semibold tracking-tight tabular-nums text-white">
-          {emailValues.total}
-        </div>
-        <div className="mt-2 text-sm text-zinc-400">
-          {emailValues.today} today · {emailValues.thirtyDay} last 30d
-        </div>
-      </div>
-    </div>
-  </div>
-</header>
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 p-4 lg:ml-auto lg:w-[320px]">
+                <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                  Emails Collected ✉️
+                </div>
+                <div className="mt-2 text-3xl font-semibold tracking-tight tabular-nums text-white">
+                  {emailValues.total}
+                </div>
+                <div className="mt-2 text-sm text-zinc-400">
+                  {emailValues.today} today · {emailValues.thirtyDay} last 30d
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
 
         <section className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <TodayCard
