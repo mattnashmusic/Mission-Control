@@ -610,19 +610,19 @@ export async function getTodayShopifyOrders(): Promise<DashboardOrder[]> {
         .map((itemEdge) => `${itemEdge.node.title} x${itemEdge.node.quantity}`)
         .join(", ");
 
-      todayOrders.push({
-        id: node.id,
-        name: node.name,
-        createdAt: node.createdAt,
-        date: formatDate(node.createdAt),
-        country:
-          node.shippingAddress?.countryCodeV2 ||
-          node.shippingAddress?.country ||
-          "—",
-        products: products || "—",
-        revenueAmount: Number(node.totalPriceSet.shopMoney.amount),
-        currencyCode: node.totalPriceSet.shopMoney.currencyCode,
-      });
+     todayOrders.push({
+  id: node.id,
+  name: node.name,
+  createdAt: node.createdAt,
+  date: new Date(node.createdAt).toLocaleDateString("en-GB"),
+  country:
+    node.shippingAddress?.countryCodeV2 ||
+    node.shippingAddress?.country ||
+    "—",
+  products: products || "—",
+  revenueAmount: Number(node.totalPriceSet.shopMoney.amount),
+  currencyCode: node.totalPriceSet.shopMoney.currencyCode,
+});
     }
 
     hasNextPage = connection.pageInfo.hasNextPage;
