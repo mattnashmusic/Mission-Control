@@ -1,6 +1,10 @@
 import { Fragment } from "react";
 import { prisma } from "@/lib/prisma";
-import { type DashboardCustomer } from "@/lib/shopify";
+import {
+  type DashboardCustomer,
+  type DashboardOrder,
+  getTodayShopifyOrders,
+} from "@/lib/shopify";
 import { getMetaSnapshot } from "@/lib/meta";
 import { calculateShippingCost } from "@/utils/shipping";
 import { getProductCost } from "@/utils/cogs";
@@ -10,6 +14,12 @@ const TIME_ZONE = "Europe/Amsterdam";
 const PROCESSING_FEE_RATE = 0.029;
 const PROCESSING_FIXED_FEE = 0.3;
 const FSH_START_DATE = "2026-02-12";
+
+type HistoricalMetaRow = {
+  date: Date;
+  spend: number;
+  purchases: number;
+};
 
 type SpendSnapshot = {
   today: number;
@@ -25,16 +35,6 @@ type PurchasesSnapshot = {
   sevenDay: number;
   thirtyDay: number;
   lifetime: number;
-};
-
-type DashboardOrder = {
-  id: string;
-  name: string;
-  date: string;
-  createdAt: string;
-  country: string;
-  products: string;
-  revenueAmount: number;
 };
 
 const PRODUCT_MATCHES = {
@@ -103,6 +103,19 @@ function buildRecentDateKeySet(days: number) {
   return keys;
 }
 
+function buildPreviousDateKeySet(daysBackExcludingToday: number) {
+  const keys = new Set<string>();
+  const now = new Date();
+
+  for (let i = 1; i <= daysBackExcludingToday; i += 1) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    keys.add(getDateKey(date));
+  }
+
+  return keys;
+}
+
 function shiftDateKey(date: Date, days: number) {
   const shifted = new Date(date);
   shifted.setDate(shifted.getDate() - days);
@@ -135,6 +148,18 @@ function filterCustomersSince(
     if (customer.email.trim() === "") return false;
     return new Date(customer.createdAt) >= startDate;
   });
+}
+
+function filterMetaByDateKeys(rows: HistoricalMetaRow[], dateKeys: Set<string>) {
+  return rows.filter((row) => dateKeys.has(getDateKey(row.date)));
+}
+
+function sumMetaSpend(rows: HistoricalMetaRow[]) {
+  return rows.reduce((sum, row) => sum + row.spend, 0);
+}
+
+function sumMetaPurchases(rows: HistoricalMetaRow[]) {
+  return rows.reduce((sum, row) => sum + row.purchases, 0);
 }
 
 function calculateRevenue(orders: DashboardOrder[]) {
@@ -283,14 +308,107 @@ function daysBetweenInclusive(start: Date, end: Date) {
   );
 }
 
-function logPerf(label: string, startedAt: number, extra?: Record<string, unknown>) {
-  const durationMs = Date.now() - startedAt;
-  if (extra) {
-    console.log(`[FSH PERF] ${label}: ${durationMs}ms`, extra);
-    return;
-  }
+function mapDbOrder(order: {
+  id: string;
+  orderNumber: string | null;
+  name: string | null;
+  createdAt: Date;
+  customerCountryCode: string | null;
+  customerCountry: string | null;
+  totalPrice: number;
+  lineItems: Array<{ title: string; quantity: number }>;
+}): DashboardOrder {
+  return {
+    id: order.id,
+    name: order.name || `#${order.orderNumber || order.id}`,
+    date: new Intl.DateTimeFormat("en-GB", {
+      timeZone: TIME_ZONE,
+      day: "2-digit",
+      month: "2-digit",
+      year: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(order.createdAt),
+    createdAt: order.createdAt.toISOString(),
+    country: order.customerCountryCode || order.customerCountry || "—",
+    products: order.lineItems
+      .flatMap((item) =>
+        Array.from({ length: Math.max(1, item.quantity) }, () => item.title)
+      )
+      .join(", "),
+    revenueAmount: order.totalPrice,
+    currencyCode: "EUR",
+  };
+}
 
-  console.log(`[FSH PERF] ${label}: ${durationMs}ms`);
+function mapDbCustomer(customer: {
+  id: string;
+  email: string | null;
+  createdAt: Date;
+  firstName: string | null;
+  lastName: string | null;
+}): DashboardCustomer {
+  return {
+    id: customer.id,
+    email: customer.email?.trim() || "",
+    createdAt: customer.createdAt.toISOString(),
+    date: new Intl.DateTimeFormat("en-GB", {
+      timeZone: TIME_ZONE,
+      day: "2-digit",
+      month: "2-digit",
+      year: "2-digit",
+    }).format(customer.createdAt),
+    name:
+      [customer.firstName ?? "", customer.lastName ?? ""].join(" ").trim() ||
+      "—",
+  };
+}
+
+function sortOrdersNewestFirst(orders: DashboardOrder[]) {
+  return [...orders].sort(
+    (a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+}
+
+function resolveLiveMeta(meta: unknown) {
+  const value = meta as
+    | {
+        spend?: { today?: number };
+        dailyBudget?: number | null;
+        salesTrackedToday?: number;
+        trackedConversions?: number;
+        budget?: number | null;
+        todaySpend?: number;
+      }
+    | undefined;
+
+  const spendToday =
+    typeof value?.spend?.today === "number"
+      ? value.spend.today
+      : typeof value?.todaySpend === "number"
+      ? value.todaySpend
+      : 0;
+
+  const dailyBudget =
+    typeof value?.dailyBudget === "number"
+      ? value.dailyBudget
+      : typeof value?.budget === "number"
+      ? value.budget
+      : null;
+
+  const salesTrackedToday =
+    typeof value?.salesTrackedToday === "number"
+      ? value.salesTrackedToday
+      : typeof value?.trackedConversions === "number"
+      ? value.trackedConversions
+      : 0;
+
+  return {
+    spendToday,
+    dailyBudget,
+    salesTrackedToday,
+  };
 }
 
 function TodayCard({
@@ -411,11 +529,11 @@ function BottomStatCard({
 }
 
 export default async function Home() {
-  const pageStartedAt = Date.now();
-  console.log("[FSH PERF] page render start");
-
-  let orders: DashboardOrder[] = [];
+  let historicalOrders: DashboardOrder[] = [];
+  let todayLiveOrders: DashboardOrder[] = [];
   let customers: DashboardCustomer[] = [];
+  let historicalMetaRows: HistoricalMetaRow[] = [];
+
   let shopifyError = "";
   let customerError = "";
   let metaError = "";
@@ -438,73 +556,42 @@ export default async function Home() {
 
   let metaDailyBudget: number | null = null;
 
-  const lastSyncStartedAt = Date.now();
-  const lastSync = await prisma.syncLog.findFirst({
-    where: {
-      domain: {
-        in: ["sync-all", "cron-sync"],
+  const todayKey = getDateKey(new Date());
+  const yesterdayKey = shiftDateKey(new Date(), 1);
+
+  const [
+    lastSync,
+    dbOrdersResult,
+    dbCustomersResult,
+    dbMetaResult,
+    liveOrdersResult,
+    liveMetaResult,
+  ] = await Promise.allSettled([
+    prisma.syncLog.findFirst({
+      where: {
+        domain: {
+          in: ["sync-all", "cron-sync"],
+        },
+        status: "success",
       },
-      status: "success",
-    },
-    orderBy: {
-      finishedAt: "desc",
-    },
-  });
-  logPerf("syncLog.findFirst", lastSyncStartedAt);
-
-  try {
-    const ordersQueryStartedAt = Date.now();
-
-    const dbOrders = await prisma.shopifyOrder.findMany({
+      orderBy: {
+        finishedAt: "desc",
+      },
+    }),
+    prisma.shopifyOrder.findMany({
       include: {
-        lineItems: true,
+        lineItems: {
+          select: {
+            title: true,
+            quantity: true,
+          },
+        },
       },
       orderBy: {
         createdAt: "desc",
       },
-    });
-
-    logPerf("shopifyOrder.findMany", ordersQueryStartedAt, {
-      rows: dbOrders.length,
-    });
-
-    const mapOrdersStartedAt = Date.now();
-
-    orders = dbOrders.map((order) => ({
-      id: order.id,
-      name: order.name || `#${order.orderNumber || order.id}`,
-      date: new Intl.DateTimeFormat("en-GB", {
-        timeZone: TIME_ZONE,
-        day: "2-digit",
-        month: "2-digit",
-        year: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(order.createdAt),
-      createdAt: order.createdAt.toISOString(),
-      country: order.customerCountryCode || order.customerCountry || "—",
-      products: order.lineItems
-        .flatMap((item) =>
-          Array.from({ length: Math.max(1, item.quantity) }, () => item.title)
-        )
-        .join(", "),
-      revenueAmount: order.totalPrice,
-    }));
-
-    logPerf("map shopify orders", mapOrdersStartedAt, {
-      mappedRows: orders.length,
-    });
-  } catch (error) {
-    shopifyError =
-      error instanceof Error ? error.message : "Unknown Shopify orders error";
-
-    console.error("[FSH PERF] shopify orders failed", error);
-  }
-
-  try {
-    const customersQueryStartedAt = Date.now();
-
-    const dbCustomers = await prisma.shopifyCustomer.findMany({
+    }),
+    prisma.shopifyCustomer.findMany({
       select: {
         id: true,
         createdAt: true,
@@ -515,88 +602,130 @@ export default async function Home() {
       orderBy: {
         createdAt: "desc",
       },
-    });
+    }),
+    prisma.metaDaily.findMany({
+      select: {
+        date: true,
+        spend: true,
+        purchases: true,
+      },
+      orderBy: {
+        date: "desc",
+      },
+    }),
+    getTodayShopifyOrders(),
+    getMetaSnapshot(),
+  ]);
 
-    logPerf("shopifyCustomer.findMany", customersQueryStartedAt, {
-      rows: dbCustomers.length,
-    });
+  const lastSyncValue =
+    lastSync.status === "fulfilled" ? lastSync.value : null;
 
-    const mapCustomersStartedAt = Date.now();
+  if (dbOrdersResult.status === "fulfilled") {
+    historicalOrders = dbOrdersResult.value
+      .map(mapDbOrder)
+      .filter((order) => getDateKey(order.createdAt) !== todayKey);
+  } else {
+    shopifyError =
+      dbOrdersResult.reason instanceof Error
+        ? dbOrdersResult.reason.message
+        : "Unknown Shopify orders error";
+  }
 
-    customers = dbCustomers.map((customer) => ({
-      id: customer.id,
-      email: customer.email?.trim() || "",
-      createdAt: customer.createdAt.toISOString(),
-      date: new Intl.DateTimeFormat("en-GB", {
-        timeZone: TIME_ZONE,
-        day: "2-digit",
-        month: "2-digit",
-        year: "2-digit",
-      }).format(customer.createdAt),
-      name:
-        [customer.firstName ?? "", customer.lastName ?? ""].join(" ").trim() ||
-        "—",
-    }));
-
-    logPerf("map shopify customers", mapCustomersStartedAt, {
-      mappedRows: customers.length,
-    });
-  } catch (error) {
+  if (dbCustomersResult.status === "fulfilled") {
+    customers = dbCustomersResult.value.map(mapDbCustomer);
+  } else {
     customerError =
-      error instanceof Error ? error.message : "Unknown Shopify customers error";
+      dbCustomersResult.reason instanceof Error
+        ? dbCustomersResult.reason.message
+        : "Unknown Shopify customers error";
     customers = [];
-    console.error("[FSH PERF] shopify customers failed", error);
   }
 
-  try {
-    const metaStartedAt = Date.now();
-    const meta = await getMetaSnapshot();
-    logPerf("getMetaSnapshot", metaStartedAt, {
-      spendToday: meta.spend.today,
-      dailyBudget: meta.dailyBudget,
-      salesTrackedToday: meta.salesTrackedToday,
-    });
-
-    metaSpend = {
-      today: meta.spend.today,
-      yesterday: meta.spend.yesterday,
-      sevenDay: meta.spend.sevenDay,
-      thirtyDay: meta.spend.thirtyDay,
-      lifetime: meta.spend.lifetime,
-    };
-
-    metaPurchases = {
-      today: meta.salesTrackedToday,
-      yesterday: 0,
-      sevenDay: 0,
-      thirtyDay: 0,
-      lifetime: 0,
-    };
-
-    metaDailyBudget = meta.dailyBudget;
-  } catch (error) {
-    metaError = error instanceof Error ? error.message : "Unknown Meta error";
-    console.error("[FSH PERF] meta snapshot failed", error);
+  if (dbMetaResult.status === "fulfilled") {
+    historicalMetaRows = dbMetaResult.value.filter(
+      (row) => getDateKey(row.date) !== todayKey
+    );
+  } else {
+    metaError =
+      dbMetaResult.reason instanceof Error
+        ? dbMetaResult.reason.message
+        : "Unknown historical Meta error";
+    historicalMetaRows = [];
   }
 
-  const calculationsStartedAt = Date.now();
+  if (liveOrdersResult.status === "fulfilled") {
+    todayLiveOrders = sortOrdersNewestFirst(
+      liveOrdersResult.value.filter(
+        (order) => getDateKey(order.createdAt) === todayKey
+      )
+    );
+  } else {
+    shopifyError =
+      liveOrdersResult.reason instanceof Error
+        ? liveOrdersResult.reason.message
+        : "Unknown live Shopify error";
+    todayLiveOrders = [];
+  }
 
-  const todayKey = getDateKey(new Date());
+  if (liveMetaResult.status === "fulfilled") {
+    const liveMeta = resolveLiveMeta(liveMetaResult.value);
 
-  const todayOrders = filterOrdersByDateKeys(orders, buildRecentDateKeySet(1));
-  const sevenDayOrders = filterOrdersByDateKeys(
-    orders,
-    buildRecentDateKeySet(7)
-  );
-  const thirtyDayOrders = filterOrdersByDateKeys(
-    orders,
-    buildRecentDateKeySet(30)
-  );
-  const lifetimeOrders = orders;
+    metaSpend.today = liveMeta.spendToday;
+    metaPurchases.today = liveMeta.salesTrackedToday;
+    metaDailyBudget = liveMeta.dailyBudget;
+  } else {
+    metaError =
+      liveMetaResult.reason instanceof Error
+        ? liveMetaResult.reason.message
+        : "Unknown Meta error";
+  }
+
+  const previous6DayKeys = buildPreviousDateKeySet(6);
+  const previous29DayKeys = buildPreviousDateKeySet(29);
+
   const yesterdayOrders = filterOrdersByDateKeys(
-    orders,
-    new Set([shiftDateKey(new Date(), 1)])
+    historicalOrders,
+    new Set([yesterdayKey])
   );
+  const previous6DayOrders = filterOrdersByDateKeys(
+    historicalOrders,
+    previous6DayKeys
+  );
+  const previous29DayOrders = filterOrdersByDateKeys(
+    historicalOrders,
+    previous29DayKeys
+  );
+
+  const todayOrders = todayLiveOrders;
+  const sevenDayOrders = [...previous6DayOrders, ...todayOrders];
+  const thirtyDayOrders = [...previous29DayOrders, ...todayOrders];
+  const lifetimeOrders = [...historicalOrders, ...todayOrders];
+
+  const yesterdayMetaRows = filterMetaByDateKeys(
+    historicalMetaRows,
+    new Set([yesterdayKey])
+  );
+  const previous6DayMetaRows = filterMetaByDateKeys(
+    historicalMetaRows,
+    previous6DayKeys
+  );
+  const previous29DayMetaRows = filterMetaByDateKeys(
+    historicalMetaRows,
+    previous29DayKeys
+  );
+
+  metaSpend.yesterday = sumMetaSpend(yesterdayMetaRows);
+  metaSpend.sevenDay = sumMetaSpend(previous6DayMetaRows) + metaSpend.today;
+  metaSpend.thirtyDay = sumMetaSpend(previous29DayMetaRows) + metaSpend.today;
+  metaSpend.lifetime = sumMetaSpend(historicalMetaRows) + metaSpend.today;
+
+  metaPurchases.yesterday = sumMetaPurchases(yesterdayMetaRows);
+  metaPurchases.sevenDay =
+    sumMetaPurchases(previous6DayMetaRows) + metaPurchases.today;
+  metaPurchases.thirtyDay =
+    sumMetaPurchases(previous29DayMetaRows) + metaPurchases.today;
+  metaPurchases.lifetime =
+    sumMetaPurchases(historicalMetaRows) + metaPurchases.today;
 
   const revenueValues = {
     today: calculateRevenue(todayOrders),
@@ -771,26 +900,10 @@ export default async function Home() {
     orderValues.lifetime
   );
 
-  const recentOrders = [...orders].slice(0, 10);
+  const recentOrders = [...todayLiveOrders, ...historicalOrders].slice(0, 10);
   const firstNonTodayRecentOrderIndex = recentOrders.findIndex(
     (order) => getDateKey(order.createdAt) !== todayKey
   );
-
-  logPerf("dashboard calculations", calculationsStartedAt, {
-    totalOrders: orders.length,
-    totalCustomers: customers.length,
-    todayOrders: todayOrders.length,
-    yesterdayOrders: yesterdayOrders.length,
-    sevenDayOrders: sevenDayOrders.length,
-    thirtyDayOrders: thirtyDayOrders.length,
-    recentOrders: recentOrders.length,
-  });
-
-  logPerf("page render total", pageStartedAt, {
-    shopifyError: shopifyError || null,
-    customerError: customerError || null,
-    metaError: metaError || null,
-  });
 
   return (
     <main className="min-h-screen bg-zinc-950 text-white">
@@ -817,7 +930,7 @@ export default async function Home() {
               <div className="flex flex-col items-start lg:items-end">
                 <SyncButton />
                 <span className="mt-1 text-xs text-zinc-500">
-                  Last synced: {formatLastSynced(lastSync?.finishedAt ?? null)}
+                  Last synced: {formatLastSynced(lastSyncValue?.finishedAt ?? null)}
                 </span>
               </div>
 
@@ -1128,7 +1241,7 @@ export default async function Home() {
                 Recent Orders
               </h3>
               <p className="text-sm text-zinc-400">
-                Latest Shopify orders pulled directly into the dashboard.
+                Today is live from Shopify. Earlier orders are from your DB.
               </p>
             </div>
 
@@ -1224,10 +1337,10 @@ export default async function Home() {
             <div className="mt-6 space-y-5">
               <div>
                 <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                  Last Synced
+                  Last Historical Sync
                 </p>
                 <p className="mt-2 text-lg font-medium text-zinc-100">
-                  {formatLastSynced(lastSync?.finishedAt ?? null)}
+                  {formatLastSynced(lastSyncValue?.finishedAt ?? null)}
                 </p>
               </div>
 
