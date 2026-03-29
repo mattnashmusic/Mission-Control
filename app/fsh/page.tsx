@@ -1169,14 +1169,6 @@ export default async function Home() {
                 />
 
                 <PerformanceRow
-                  label="Total Products Sold"
-                  yesterday={String(totalProductsValues.yesterday)}
-                  sevenDay={String(totalProductsValues.sevenDay)}
-                  thirtyDay={String(totalProductsValues.thirtyDay)}
-                  lifetime={String(totalProductsValues.lifetime)}
-                />
-
-                <PerformanceRow
                   label="AOV"
                   yesterday={money(aovValues.yesterday)}
                   sevenDay={money(aovValues.sevenDay)}
@@ -1266,11 +1258,6 @@ export default async function Home() {
 
           <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
             <BottomStatCard
-              label="Total Products Sold"
-              value={totalProductsValues.lifetime}
-            />
-
-            <BottomStatCard
               label="Lifetime Net Profit"
               value={signedMoney(netProfitValues.lifetime)}
               valueClassName={
@@ -1298,6 +1285,11 @@ export default async function Home() {
             <BottomStatCard
               label="Vinyl Take Rate"
               value={percent(lifetimeVinylTakeRate)}
+            />
+
+            <BottomStatCard
+              label="Total Products Sold"
+              value={totalProductsValues.lifetime}
             />
           </div>
         </section>
