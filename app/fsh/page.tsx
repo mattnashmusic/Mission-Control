@@ -257,6 +257,17 @@ function calculateTakeRate(count: number, totalOrders: number) {
   return (count / totalOrders) * 100;
 }
 
+function calculateSpendUsagePercent(spend: number, budget: number | null) {
+  if (!budget || budget <= 0) return 0;
+  return (spend / budget) * 100;
+}
+
+function getNetProfitTextClass(value: number) {
+  if (value > 0) return "font-semibold text-emerald-400";
+  if (value < 0) return "font-semibold text-rose-400";
+  return "font-semibold text-zinc-300";
+}
+
 function calculatePsm(
   revenue: number,
   productCosts: number,
@@ -464,6 +475,10 @@ function PerformanceRow({
   thirtyDay,
   lifetime,
   emphasize = false,
+  yesterdayClassName,
+  sevenDayClassName,
+  thirtyDayClassName,
+  lifetimeClassName,
 }: {
   label: string;
   yesterday: string;
@@ -471,34 +486,42 @@ function PerformanceRow({
   thirtyDay: string;
   lifetime: string;
   emphasize?: boolean;
+  yesterdayClassName?: string;
+  sevenDayClassName?: string;
+  thirtyDayClassName?: string;
+  lifetimeClassName?: string;
 }) {
+  const defaultClassName = emphasize
+    ? "font-semibold text-white"
+    : "text-zinc-300";
+
   return (
     <tr className="border-t border-zinc-800">
       <td className="px-4 py-4 text-sm font-medium text-zinc-200">{label}</td>
       <td
         className={`px-4 py-4 text-right text-sm tabular-nums ${
-          emphasize ? "font-semibold text-white" : "text-zinc-300"
+          yesterdayClassName ?? defaultClassName
         }`}
       >
         {yesterday}
       </td>
       <td
         className={`px-4 py-4 text-right text-sm tabular-nums ${
-          emphasize ? "font-semibold text-white" : "text-zinc-300"
+          sevenDayClassName ?? defaultClassName
         }`}
       >
         {sevenDay}
       </td>
       <td
         className={`px-4 py-4 text-right text-sm tabular-nums ${
-          emphasize ? "font-semibold text-white" : "text-zinc-300"
+          thirtyDayClassName ?? defaultClassName
         }`}
       >
         {thirtyDay}
       </td>
       <td
         className={`px-4 py-4 text-right text-sm tabular-nums ${
-          emphasize ? "font-semibold text-white" : "text-zinc-300"
+          lifetimeClassName ?? defaultClassName
         }`}
       >
         {lifetime}
@@ -820,7 +843,20 @@ export default async function Home() {
     orderValues.today
   );
 
-  const todayTotalProducts = calculateTotalProducts(todayOrders);
+  const totalProductsValues = {
+    today: calculateTotalProducts(todayOrders),
+    yesterday: calculateTotalProducts(yesterdayOrders),
+    sevenDay: calculateTotalProducts(sevenDayOrders),
+    thirtyDay: calculateTotalProducts(thirtyDayOrders),
+    lifetime: calculateTotalProducts(lifetimeOrders),
+  };
+
+  const todayTotalProducts = totalProductsValues.today;
+
+  const spendUsageToday = calculateSpendUsagePercent(
+    metaSpend.today,
+    metaDailyBudget
+  );
 
   const aovVsSevenDay = calculatePreviousPeriodChange(
     aovValues.today,
@@ -1020,6 +1056,19 @@ export default async function Home() {
                     ? "—"
                     : money(metaDailyBudget),
               },
+              {
+                label: "% of Daily Spend",
+                value:
+                  metaError || metaDailyBudget === null
+                    ? "—"
+                    : percent(spendUsageToday),
+                valueClassName:
+                  metaError || metaDailyBudget === null
+                    ? "text-zinc-400"
+                    : spendUsageToday <= 100
+                      ? "text-emerald-400"
+                      : "text-rose-400",
+              },
             ]}
           />
 
@@ -1120,6 +1169,14 @@ export default async function Home() {
                 />
 
                 <PerformanceRow
+                  label="Total Products Sold"
+                  yesterday={String(totalProductsValues.yesterday)}
+                  sevenDay={String(totalProductsValues.sevenDay)}
+                  thirtyDay={String(totalProductsValues.thirtyDay)}
+                  lifetime={String(totalProductsValues.lifetime)}
+                />
+
+                <PerformanceRow
                   label="AOV"
                   yesterday={money(aovValues.yesterday)}
                   sevenDay={money(aovValues.sevenDay)}
@@ -1181,7 +1238,18 @@ export default async function Home() {
                   sevenDay={signedMoney(netProfitValues.sevenDay)}
                   thirtyDay={signedMoney(netProfitValues.thirtyDay)}
                   lifetime={signedMoney(netProfitValues.lifetime)}
-                  emphasize
+                  yesterdayClassName={getNetProfitTextClass(
+                    netProfitValues.yesterday
+                  )}
+                  sevenDayClassName={getNetProfitTextClass(
+                    netProfitValues.sevenDay
+                  )}
+                  thirtyDayClassName={getNetProfitTextClass(
+                    netProfitValues.thirtyDay
+                  )}
+                  lifetimeClassName={getNetProfitTextClass(
+                    netProfitValues.lifetime
+                  )}
                 />
 
                 <PerformanceRow
@@ -1198,8 +1266,8 @@ export default async function Home() {
 
           <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
             <BottomStatCard
-              label="Total Orders"
-              value={orderValues.lifetime}
+              label="Total Products Sold"
+              value={totalProductsValues.lifetime}
             />
 
             <BottomStatCard
