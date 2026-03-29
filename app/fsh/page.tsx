@@ -1256,7 +1256,7 @@ export default async function Home() {
             </table>
           </div>
 
-          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-7">
             <BottomStatCard
               label="Lifetime Net Profit"
               value={signedMoney(netProfitValues.lifetime)}
@@ -1290,6 +1290,11 @@ export default async function Home() {
             <BottomStatCard
               label="Total Products Sold"
               value={totalProductsValues.lifetime}
+            />
+
+            <BottomStatCard
+              label="Total Orders"
+              value={orderValues.lifetime}
             />
           </div>
         </section>
