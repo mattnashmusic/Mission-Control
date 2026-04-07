@@ -601,19 +601,24 @@ export default async function Home() {
         finishedAt: "desc",
       },
     }),
-    prisma.shopifyOrder.findMany({
-      include: {
-        lineItems: {
-          select: {
-            title: true,
-            quantity: true,
-          },
-        },
+   prisma.shopifyOrder.findMany({
+  where: {
+    orderNumber: {
+      not: null,
+    },
+  },
+  include: {
+    lineItems: {
+      select: {
+        title: true,
+        quantity: true,
       },
-      orderBy: {
-        createdAt: "desc",
-      },
-    }),
+    },
+  },
+  orderBy: {
+    createdAt: "desc",
+  },
+}),
     prisma.shopifyCustomer.findMany({
       select: {
         id: true,

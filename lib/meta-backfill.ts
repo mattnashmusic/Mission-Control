@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 
 const META_API_VERSION = "v25.0";
 const FSH_START_DATE = "2026-02-12";
+const TIME_ZONE = "Europe/Amsterdam";
 
 type MetaInsightsRow = {
   date_start: string;
@@ -52,6 +53,24 @@ function formatUtcDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+function getLocalDateString(date: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function getYesterdayLocalDateString() {
+  const now = new Date();
+  const localNow = new Date(
+    now.toLocaleString("en-US", { timeZone: TIME_ZONE })
+  );
+  localNow.setDate(localNow.getDate() - 1);
+  return getLocalDateString(localNow);
+}
+
 function getPurchaseCountFromActions(
   actions: MetaInsightsRow["actions"] | undefined
 ) {
@@ -64,7 +83,13 @@ function getPurchaseCountFromActions(
       action.action_type === "offsite_conversion.fb_pixel_purchase"
   );
 
-  return purchaseAction ? Number(purchaseAction.value || 0) : 0;
+  return purchaseAction ? Number(actionSafeValue(purchaseAction.value)) : 0;
+}
+
+function actionSafeValue(value: string | undefined) {
+  if (!value) return 0;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
 }
 
 function buildDateRange(startDate: string, endDate: string) {
@@ -80,9 +105,8 @@ function buildDateRange(startDate: string, endDate: string) {
   return dates;
 }
 
-async function fetchAllMetaInsightsRows() {
+async function fetchAllMetaInsightsRows(untilDate: string) {
   const { accessToken, adAccountId } = getMetaEnv();
-  const todayString = new Date().toISOString().slice(0, 10);
 
   const params = new URLSearchParams({
     fields: "spend,actions",
@@ -91,7 +115,7 @@ async function fetchAllMetaInsightsRows() {
     action_report_time: "conversion",
     time_range: JSON.stringify({
       since: FSH_START_DATE,
-      until: todayString,
+      until: untilDate,
     }),
     limit: "500",
     access_token: accessToken,
@@ -122,17 +146,36 @@ async function fetchAllMetaInsightsRows() {
 }
 
 export async function backfillMetaDailyToDb() {
+  const yesterdayString = getYesterdayLocalDateString();
+
   const syncLog = await prisma.syncLog.create({
     data: {
       domain: "meta-daily-backfill",
       status: "running",
-      message: `Backfilling Meta daily data from ${FSH_START_DATE}`,
+      message: `Backfilling Meta daily data from ${FSH_START_DATE} to ${yesterdayString}`,
     },
   });
 
   try {
-    const todayString = new Date().toISOString().slice(0, 10);
-    const rows = await fetchAllMetaInsightsRows();
+    if (yesterdayString < FSH_START_DATE) {
+      await prisma.syncLog.update({
+        where: { id: syncLog.id },
+        data: {
+          status: "success",
+          message: "No completed days available to backfill yet",
+          finishedAt: new Date(),
+        },
+      });
+
+      return {
+        ok: true,
+        rowsFetchedFromApi: 0,
+        totalDaysCovered: 0,
+        rowsUpserted: 0,
+      };
+    }
+
+    const rows = await fetchAllMetaInsightsRows(yesterdayString);
 
     const rowMap = new Map<
       string,
@@ -149,7 +192,7 @@ export async function backfillMetaDailyToDb() {
       });
     }
 
-    const allDates = buildDateRange(FSH_START_DATE, todayString);
+    const allDates = buildDateRange(FSH_START_DATE, yesterdayString);
     let upserted = 0;
 
     for (const dateString of allDates) {
@@ -178,7 +221,7 @@ export async function backfillMetaDailyToDb() {
       where: { id: syncLog.id },
       data: {
         status: "success",
-        message: `Backfilled ${upserted} Meta daily rows (${rows.length} fetched from API)`,
+        message: `Backfilled ${upserted} Meta daily rows (${rows.length} fetched from API) through ${yesterdayString}`,
         finishedAt: new Date(),
       },
     });
@@ -188,6 +231,7 @@ export async function backfillMetaDailyToDb() {
       rowsFetchedFromApi: rows.length,
       totalDaysCovered: allDates.length,
       rowsUpserted: upserted,
+      throughDate: yesterdayString,
     };
   } catch (error) {
     await prisma.syncLog.update({
