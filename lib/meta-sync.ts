@@ -1,58 +1,35 @@
 import { prisma } from "@/lib/prisma";
 import { getMetaSnapshot } from "@/lib/meta";
 
-function getAmsterdamDateKey(date: Date) {
-  return new Intl.DateTimeFormat("en-CA", {
+function getAmsterdamStartOfDay() {
+  const now = new Date();
+
+  const dateKey = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Europe/Amsterdam",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(date);
-}
+  }).format(now);
 
-function getMetaDailyRowDate(date: Date) {
-  const dateKey = getAmsterdamDateKey(date);
   return new Date(`${dateKey}T00:00:00.000Z`);
 }
 
-function resolveLiveMeta(meta: unknown) {
-  const value = meta as
-    | {
-        spend?: { today?: number };
-        dailyBudget?: number | null;
-        salesTrackedToday?: number;
-        trackedConversions?: number;
-        budget?: number | null;
-        todaySpend?: number;
-      }
-    | undefined;
-
-  const spendToday =
-    typeof value?.spend?.today === "number"
-      ? value.spend.today
-      : typeof value?.todaySpend === "number"
-      ? value.todaySpend
+function resolveMeta(meta: any) {
+  const spend =
+    typeof meta?.spend?.today === "number"
+      ? meta.spend.today
+      : typeof meta?.todaySpend === "number"
+      ? meta.todaySpend
       : 0;
 
-  const salesTrackedToday =
-    typeof value?.salesTrackedToday === "number"
-      ? value.salesTrackedToday
-      : typeof value?.trackedConversions === "number"
-      ? value.trackedConversions
+  const purchases =
+    typeof meta?.salesTrackedToday === "number"
+      ? meta.salesTrackedToday
+      : typeof meta?.trackedConversions === "number"
+      ? meta.trackedConversions
       : 0;
 
-  const dailyBudget =
-    typeof value?.dailyBudget === "number"
-      ? value.dailyBudget
-      : typeof value?.budget === "number"
-      ? value.budget
-      : null;
-
-  return {
-    spendToday,
-    salesTrackedToday,
-    dailyBudget,
-  };
+  return { spend, purchases };
 }
 
 export async function syncMetaDailyToDb() {
@@ -60,26 +37,27 @@ export async function syncMetaDailyToDb() {
     data: {
       domain: "meta-daily",
       status: "running",
-      message: "Fetching live Meta snapshot and writing today into MetaDaily",
+      message: "Fetching Meta + writing to DB",
     },
   });
 
   try {
     const snapshot = await getMetaSnapshot();
-    const liveMeta = resolveLiveMeta(snapshot);
-    const rowDate = getMetaDailyRowDate(new Date());
+    const { spend, purchases } = resolveMeta(snapshot);
 
-    const saved = await prisma.metaDaily.upsert({
-      where: { date: rowDate },
+    const date = getAmsterdamStartOfDay();
+
+    const result = await prisma.metaDaily.upsert({
+      where: { date },
       update: {
-        spend: liveMeta.spendToday,
-        purchases: liveMeta.salesTrackedToday,
+        spend,
+        purchases,
         syncedAt: new Date(),
       },
       create: {
-        date: rowDate,
-        spend: liveMeta.spendToday,
-        purchases: liveMeta.salesTrackedToday,
+        date,
+        spend,
+        purchases,
         syncedAt: new Date(),
       },
     });
@@ -88,31 +66,19 @@ export async function syncMetaDailyToDb() {
       where: { id: syncLog.id },
       data: {
         status: "success",
-        message: JSON.stringify({
-          ok: true,
-          date: rowDate.toISOString(),
-          spend: saved.spend,
-          purchases: saved.purchases,
-          dailyBudget: liveMeta.dailyBudget,
-        }),
+        message: JSON.stringify(result),
         finishedAt: new Date(),
       },
     });
 
-    return {
-      ok: true,
-      date: rowDate.toISOString(),
-      spend: saved.spend,
-      purchases: saved.purchases,
-      dailyBudget: liveMeta.dailyBudget,
-    };
+    return { ok: true, spend, purchases };
   } catch (error) {
     await prisma.syncLog.update({
       where: { id: syncLog.id },
       data: {
         status: "error",
         message:
-          error instanceof Error ? error.message : "Unknown Meta sync error",
+          error instanceof Error ? error.message : "Meta sync error",
         finishedAt: new Date(),
       },
     });
