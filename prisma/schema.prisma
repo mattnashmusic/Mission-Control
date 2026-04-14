@@ -9,25 +9,25 @@ datasource db {
 }
 
 model Show {
-  id              String   @id @default(cuid())
-  slug            String   @unique
-  date            DateTime
-  city            String
-  country         String
-  venue           String
-  notes           String?
+  id      String   @id @default(cuid())
+  slug    String   @unique
+  date    DateTime
+  city    String
+  country String
+  venue   String
+  notes   String?
 
-  capacity        Int
-  ticketPrice     Float
-  ticketSales     Int      @default(0)
-  metaSpend       Float    @default(0)
+  capacity    Int
+  ticketPrice Float
+  ticketSales Int   @default(0)
+  metaSpend   Float @default(0)
 
-  venueHire       Float    @default(0)
-  production      Float    @default(0)
-  hotelPetrolMisc Float    @default(0)
+  venueHire       Float @default(0)
+  production      Float @default(0)
+  hotelPetrolMisc Float @default(0)
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model TourSettings {
@@ -39,7 +39,7 @@ model TourSettings {
 }
 
 model ShopifyOrder {
-  id                       String   @id
+  id                       String                 @id
   orderNumber              String?
   name                     String?
   createdAt                DateTime
@@ -53,14 +53,14 @@ model ShopifyOrder {
   customerLastName         String?
   customerCountry          String?
   customerCountryCode      String?
-  subtotalPrice            Float    @default(0)
-  totalDiscounts           Float    @default(0)
-  totalShipping            Float    @default(0)
-  totalTax                 Float    @default(0)
-  totalPrice               Float    @default(0)
+  subtotalPrice            Float                  @default(0)
+  totalDiscounts           Float                  @default(0)
+  totalShipping            Float                  @default(0)
+  totalTax                 Float                  @default(0)
+  totalPrice               Float                  @default(0)
   tags                     String?
   rawJson                  Json?
-  syncedAt                 DateTime @default(now())
+  syncedAt                 DateTime               @default(now())
   lineItems                ShopifyOrderLineItem[]
 
   @@index([createdAt])
@@ -89,19 +89,19 @@ model ShopifyOrderLineItem {
 }
 
 model ShopifyCustomer {
-  id               String   @id
+  id               String    @id
   createdAt        DateTime
   updatedAtShopify DateTime?
   email            String?
   firstName        String?
   lastName         String?
-  ordersCount      Int      @default(0)
-  totalSpent       Float    @default(0)
+  ordersCount      Int       @default(0)
+  totalSpent       Float     @default(0)
   country          String?
   countryCode      String?
   tags             String?
   rawJson          Json?
-  syncedAt         DateTime @default(now())
+  syncedAt         DateTime  @default(now())
 
   @@index([createdAt])
   @@index([email])
@@ -109,12 +109,12 @@ model ShopifyCustomer {
 }
 
 model MetaDaily {
-  date        DateTime @id
-  spend       Float    @default(0)
-  purchases   Int      @default(0)
-  syncedAt    DateTime @default(now())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  date      DateTime @id
+  spend     Float    @default(0)
+  purchases Int      @default(0)
+  syncedAt  DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model AppSetting {
@@ -125,10 +125,26 @@ model AppSetting {
 }
 
 model SyncLog {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   domain     String
   status     String
   message    String?
-  startedAt  DateTime @default(now())
+  startedAt  DateTime  @default(now())
   finishedAt DateTime?
+}
+
+model TourVote {
+  id              String   @id @default(cuid())
+  name            String
+  email           String
+  selectedCity    String
+  selectedCountry String
+  inferredCity    String?
+  inferredCountry String?
+  source          String?  @default("tourvote")
+  createdAt       DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([selectedCity])
+  @@index([selectedCountry])
 }
