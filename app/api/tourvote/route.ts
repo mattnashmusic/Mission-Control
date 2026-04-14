@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -51,27 +50,6 @@ function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function sha256(value: string): string {
-  return crypto
-    .createHash("sha256")
-    .update(value.trim().toLowerCase())
-    .digest("hex");
-}
-
-function getClientIp(req: NextRequest): string {
-  const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) {
-    return forwarded.split(",")[0].trim();
-  }
-
-  const realIp = req.headers.get("x-real-ip");
-  if (realIp) {
-    return realIp.trim();
-  }
-
-  return "";
-}
-
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   try {
@@ -106,11 +84,6 @@ export async function POST(req: NextRequest) {
     const inferredCountry = body.inferredCountry?.trim() || "";
     const source = body.source?.trim() || "tourvote";
     const eventId = body.eventId?.trim() || "";
-    const pageUrl =
-      body.pageUrl?.trim() || "https://mattnash.com/pages/tourvote";
-    const referrer = body.referrer?.trim() || "";
-    const userAgent =
-      body.userAgent?.trim() || req.headers.get("user-agent") || "";
 
     if (!name || !email || !selectedCity || !selectedCountry || !eventId) {
       return jsonResponse(
@@ -128,47 +101,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const MAILERLITE_API_KEY = process.env.MAILERLITE_API_KEY;
-    const MAILERLITE_GROUP_ID = process.env.MAILERLITE_GROUP_ID;
-    const META_PIXEL_ID = process.env.META_PIXEL_ID;
-    const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
-
-    if (!MAILERLITE_API_KEY) {
-      return jsonResponse(
-        { ok: false, error: "Missing MAILERLITE_API_KEY" },
-        500,
-        headers
-      );
-    }
-
-    if (!MAILERLITE_GROUP_ID) {
-      return jsonResponse(
-        { ok: false, error: "Missing MAILERLITE_GROUP_ID" },
-        500,
-        headers
-      );
-    }
-
-    if (!META_PIXEL_ID) {
-      return jsonResponse(
-        { ok: false, error: "Missing META_PIXEL_ID" },
-        500,
-        headers
-      );
-    }
-
-    if (!META_ACCESS_TOKEN) {
-      return jsonResponse(
-        { ok: false, error: "Missing META_ACCESS_TOKEN" },
-        500,
-        headers
-      );
-    }
-
-    let savedVote: { id: string };
-
     try {
-      savedVote = await prisma.tourVote.create({
+      const savedVote = await prisma.tourVote.create({
         data: {
           name,
           email,
@@ -178,10 +112,22 @@ export async function POST(req: NextRequest) {
           inferredCountry: inferredCountry || null,
           source,
         },
-        select: { id: true },
+        select: {
+          id: true,
+        },
       });
+
+      return jsonResponse(
+        {
+          ok: true,
+          id: savedVote.id,
+        },
+        200,
+        headers
+      );
     } catch (error) {
       console.error("Tour vote DB error:", error);
+
       return jsonResponse(
         {
           ok: false,
@@ -192,144 +138,6 @@ export async function POST(req: NextRequest) {
         headers
       );
     }
-
-    let mailerLiteJson: unknown = {};
-
-    try {
-      const mailerLiteResponse = await fetch(
-        "https://connect.mailerlite.com/api/subscribers",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            Authorization: `Bearer ${MAILERLITE_API_KEY}`,
-          },
-          body: JSON.stringify({
-            email,
-            fields: {
-              name,
-              tour_vote_city: selectedCity,
-              tour_vote_country: selectedCountry,
-              tour_vote_inferred_city: inferredCity,
-              tour_vote_inferred_country: inferredCountry,
-              tour_vote_source: source,
-            },
-            groups: [MAILERLITE_GROUP_ID],
-            status: "active",
-          }),
-        }
-      );
-
-      mailerLiteJson = await mailerLiteResponse.json().catch(() => ({}));
-
-      if (!mailerLiteResponse.ok) {
-        console.error("MailerLite error:", mailerLiteJson);
-        return jsonResponse(
-          {
-            ok: false,
-            error: "MailerLite upsert failed",
-            details: mailerLiteJson as Record<string, unknown>,
-          },
-          502,
-          headers
-        );
-      }
-    } catch (error) {
-      console.error("MailerLite request error:", error);
-      return jsonResponse(
-        {
-          ok: false,
-          error: "MailerLite request crashed",
-          details: getErrorMessage(error),
-        },
-        500,
-        headers
-      );
-    }
-
-    try {
-      const clientIp = getClientIp(req);
-      const eventTime = Math.floor(Date.now() / 1000);
-
-      const metaPayload = {
-        data: [
-          {
-            event_name: "Lead",
-            event_time: eventTime,
-            action_source: "website",
-            event_source_url: pageUrl,
-            event_id: eventId,
-            user_data: {
-              em: [sha256(email)],
-              fn: [sha256(name)],
-              client_ip_address: clientIp,
-              client_user_agent: userAgent,
-              country: [sha256(selectedCountry)],
-              ct: [sha256(selectedCity)],
-            },
-            custom_data: {
-              content_name: "Tour Vote",
-              content_category: "Tour Signup",
-              selected_city: selectedCity,
-              selected_country: selectedCountry,
-              inferred_city: inferredCity,
-              inferred_country: inferredCountry,
-              source,
-              referrer,
-            },
-          },
-        ],
-      };
-
-      const metaResponse = await fetch(
-        `https://graph.facebook.com/v23.0/${META_PIXEL_ID}/events?access_token=${encodeURIComponent(
-          META_ACCESS_TOKEN
-        )}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(metaPayload),
-        }
-      );
-
-      const metaJson = await metaResponse.json().catch(() => ({}));
-
-      if (!metaResponse.ok) {
-        console.error("Meta CAPI error:", metaJson);
-        return jsonResponse(
-          {
-            ok: false,
-            error: "Meta CAPI failed",
-            details: metaJson as Record<string, unknown>,
-          },
-          502,
-          headers
-        );
-      }
-    } catch (error) {
-      console.error("Meta request error:", error);
-      return jsonResponse(
-        {
-          ok: false,
-          error: "Meta request crashed",
-          details: getErrorMessage(error),
-        },
-        500,
-        headers
-      );
-    }
-
-    return jsonResponse(
-      {
-        ok: true,
-        id: savedVote.id,
-      },
-      200,
-      headers
-    );
   } catch (error) {
     console.error("Tour vote route fatal error:", error);
 
