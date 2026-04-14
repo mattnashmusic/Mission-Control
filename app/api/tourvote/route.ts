@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import prisma from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
 
 type TourVoteBody = {
   name?: string;
@@ -152,7 +152,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 1) Save vote in Mission Control DB
     const savedVote = await prisma.tourVote.create({
       data: {
         name,
@@ -165,7 +164,6 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // 2) Upsert subscriber in MailerLite
     const mailerLiteResponse = await fetch(
       "https://connect.mailerlite.com/api/subscribers",
       {
@@ -206,7 +204,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3) Send Meta CAPI Lead event
     const clientIp = getClientIp(req);
     const eventTime = Math.floor(Date.now() / 1000);
 
