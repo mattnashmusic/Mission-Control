@@ -6,6 +6,7 @@ const TIME_ZONE = "Europe/Amsterdam";
 
 type MetaInsightsRow = {
   date_start: string;
+  date_stop?: string;
   spend?: string;
   actions?: Array<{
     action_type: string;
@@ -26,22 +27,15 @@ function getMetaEnv() {
     process.env.FACEBOOK_ACCESS_TOKEN ||
     process.env.META_TOKEN;
 
-  const adAccountId =
-    process.env.META_AD_ACCOUNT_ID ||
-    process.env.FACEBOOK_AD_ACCOUNT_ID ||
-    process.env.META_ACCOUNT_ID;
+  const campaignId = process.env.META_CAMPAIGN_ID;
 
-  if (!accessToken || !adAccountId) {
-    throw new Error(
-      "Missing META_ACCESS_TOKEN (or FACEBOOK_ACCESS_TOKEN) or META_AD_ACCOUNT_ID (or FACEBOOK_AD_ACCOUNT_ID)."
-    );
+  if (!accessToken || !campaignId) {
+    throw new Error("Missing META_ACCESS_TOKEN or META_CAMPAIGN_ID.");
   }
 
   return {
     accessToken,
-    adAccountId: adAccountId.startsWith("act_")
-      ? adAccountId
-      : `act_${adAccountId}`,
+    campaignId,
   };
 }
 
@@ -71,6 +65,12 @@ function getYesterdayLocalDateString() {
   return getLocalDateString(localNow);
 }
 
+function actionSafeValue(value: string | undefined) {
+  if (!value) return 0;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
 function getPurchaseCountFromActions(
   actions: MetaInsightsRow["actions"] | undefined
 ) {
@@ -84,12 +84,6 @@ function getPurchaseCountFromActions(
   );
 
   return purchaseAction ? Number(actionSafeValue(purchaseAction.value)) : 0;
-}
-
-function actionSafeValue(value: string | undefined) {
-  if (!value) return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
 }
 
 function buildDateRange(startDate: string, endDate: string) {
@@ -106,13 +100,11 @@ function buildDateRange(startDate: string, endDate: string) {
 }
 
 async function fetchAllMetaInsightsRows(untilDate: string) {
-  const { accessToken, adAccountId } = getMetaEnv();
+  const { accessToken, campaignId } = getMetaEnv();
 
   const params = new URLSearchParams({
-    fields: "spend,actions",
-    level: "account",
+    fields: "spend,actions,date_start,date_stop",
     time_increment: "1",
-    action_report_time: "conversion",
     time_range: JSON.stringify({
       since: FSH_START_DATE,
       until: untilDate,
@@ -121,7 +113,7 @@ async function fetchAllMetaInsightsRows(untilDate: string) {
     access_token: accessToken,
   });
 
-  let url = `https://graph.facebook.com/${META_API_VERSION}/${adAccountId}/insights?${params.toString()}`;
+  let url = `https://graph.facebook.com/${META_API_VERSION}/${campaignId}/insights?${params.toString()}`;
   const allRows: MetaInsightsRow[] = [];
 
   while (url) {
@@ -138,7 +130,6 @@ async function fetchAllMetaInsightsRows(untilDate: string) {
     const json = (await response.json()) as MetaInsightsResponse;
     const rows = json.data ?? [];
     allRows.push(...rows);
-
     url = json.paging?.next ?? "";
   }
 
@@ -152,7 +143,7 @@ export async function backfillMetaDailyToDb() {
     data: {
       domain: "meta-daily-backfill",
       status: "running",
-      message: `Backfilling Meta daily data from ${FSH_START_DATE} to ${yesterdayString}`,
+      message: `Backfilling Meta campaign data from ${FSH_START_DATE} to ${yesterdayString}`,
     },
   });
 
@@ -221,7 +212,7 @@ export async function backfillMetaDailyToDb() {
       where: { id: syncLog.id },
       data: {
         status: "success",
-        message: `Backfilled ${upserted} Meta daily rows (${rows.length} fetched from API) through ${yesterdayString}`,
+        message: `Backfilled ${upserted} Meta daily campaign rows (${rows.length} fetched from API) through ${yesterdayString}`,
         finishedAt: new Date(),
       },
     });
