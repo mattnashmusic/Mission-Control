@@ -14,40 +14,31 @@ function getAmsterdamStartOfDay() {
   return new Date(`${dateKey}T00:00:00.000Z`);
 }
 
-function resolveMeta(meta: any) {
-  const spend =
-    typeof meta?.spend?.today === "number"
-      ? meta.spend.today
-      : typeof meta?.todaySpend === "number"
-      ? meta.todaySpend
-      : 0;
-
-  const purchases =
-    typeof meta?.salesTrackedToday === "number"
-      ? meta.salesTrackedToday
-      : typeof meta?.trackedConversions === "number"
-      ? meta.trackedConversions
-      : 0;
-
-  return { spend, purchases };
-}
-
 export async function syncMetaDailyToDb() {
   const syncLog = await prisma.syncLog.create({
     data: {
       domain: "meta-daily",
       status: "running",
-      message: "Fetching Meta + writing to DB",
+      message: "Writing today Meta spend to DB",
     },
   });
 
   try {
     const snapshot = await getMetaSnapshot();
-    const { spend, purchases } = resolveMeta(snapshot);
+
+    const spend =
+      typeof snapshot?.spend?.today === "number"
+        ? snapshot.spend.today
+        : 0;
+
+    const purchases =
+      typeof snapshot?.salesTrackedToday === "number"
+        ? snapshot.salesTrackedToday
+        : 0;
 
     const date = getAmsterdamStartOfDay();
 
-    const result = await prisma.metaDaily.upsert({
+    await prisma.metaDaily.upsert({
       where: { date },
       update: {
         spend,
@@ -66,12 +57,12 @@ export async function syncMetaDailyToDb() {
       where: { id: syncLog.id },
       data: {
         status: "success",
-        message: JSON.stringify(result),
+        message: `Saved today Meta spend: ${spend}`,
         finishedAt: new Date(),
       },
     });
 
-    return { ok: true, spend, purchases };
+    return { ok: true, spend };
   } catch (error) {
     await prisma.syncLog.update({
       where: { id: syncLog.id },
