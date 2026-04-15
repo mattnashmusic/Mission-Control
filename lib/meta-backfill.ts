@@ -6,7 +6,6 @@ const TIME_ZONE = "Europe/Amsterdam";
 
 type MetaInsightsRow = {
   date_start: string;
-  date_stop?: string;
   spend?: string;
   actions?: Array<{
     action_type: string;
@@ -65,12 +64,6 @@ function getYesterdayLocalDateString() {
   return getLocalDateString(localNow);
 }
 
-function actionSafeValue(value: string | undefined) {
-  if (!value) return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
-}
-
 function getPurchaseCountFromActions(
   actions: MetaInsightsRow["actions"] | undefined
 ) {
@@ -84,6 +77,12 @@ function getPurchaseCountFromActions(
   );
 
   return purchaseAction ? Number(actionSafeValue(purchaseAction.value)) : 0;
+}
+
+function actionSafeValue(value: string | undefined) {
+  if (!value) return 0;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
 }
 
 function buildDateRange(startDate: string, endDate: string) {
@@ -103,8 +102,9 @@ async function fetchAllMetaInsightsRows(untilDate: string) {
   const { accessToken, campaignId } = getMetaEnv();
 
   const params = new URLSearchParams({
-    fields: "spend,actions,date_start,date_stop",
+    fields: "spend,actions",
     time_increment: "1",
+    action_report_time: "impression",
     time_range: JSON.stringify({
       since: FSH_START_DATE,
       until: untilDate,
@@ -130,6 +130,7 @@ async function fetchAllMetaInsightsRows(untilDate: string) {
     const json = (await response.json()) as MetaInsightsResponse;
     const rows = json.data ?? [];
     allRows.push(...rows);
+
     url = json.paging?.next ?? "";
   }
 
@@ -143,7 +144,7 @@ export async function backfillMetaDailyToDb() {
     data: {
       domain: "meta-daily-backfill",
       status: "running",
-      message: `Backfilling Meta campaign data from ${FSH_START_DATE} to ${yesterdayString}`,
+      message: `Backfilling Meta daily data from ${FSH_START_DATE} to ${yesterdayString}`,
     },
   });
 
@@ -212,7 +213,7 @@ export async function backfillMetaDailyToDb() {
       where: { id: syncLog.id },
       data: {
         status: "success",
-        message: `Backfilled ${upserted} Meta daily campaign rows (${rows.length} fetched from API) through ${yesterdayString}`,
+        message: `Backfilled ${upserted} Meta daily rows (${rows.length} fetched from API) through ${yesterdayString}`,
         finishedAt: new Date(),
       },
     });
