@@ -28,6 +28,7 @@ export default function RootLayout({
               <Link href="/tour" className="hover:text-gray-300">
                 Tour
               </Link>
+              <Link href="/tour-vote">Tour Vote</Link>
             </nav>
           </aside>
 
