@@ -478,8 +478,8 @@ export default async function Home() {
           <HubCard
             href="/tour-vote"
             emoji="🗳️"
-            title="Tour Vote / Signups"
-            subtitle="Presale demand signals"
+            title="Tour Vote"
+            subtitle="Pre-Tour Data Collection"
             stats={[
               {
                 label: "Total Signups",
