@@ -16,6 +16,11 @@ type TourVoteRow = {
   createdAt: Date;
 };
 
+type MetaDailyRow = {
+  date: Date;
+  spend: number;
+};
+
 function money(value: number) {
   return new Intl.NumberFormat("en-GB", {
     style: "currency",
@@ -100,6 +105,17 @@ function getCountryLeaderboard(votes: TourVoteRow[]) {
     .sort((a, b) => b.count - a.count);
 }
 
+function getHistoricMetaSpendExcludingToday(rows: MetaDailyRow[]) {
+  const todayKey = getDateKey(new Date());
+
+  return rows.reduce((sum, row) => {
+    if (getDateKey(row.date) === todayKey) {
+      return sum;
+    }
+    return sum + (row.spend || 0);
+  }, 0);
+}
+
 function KpiCard({
   title,
   value,
@@ -127,6 +143,7 @@ function KpiCard({
 export default async function TourVotePage() {
   let votes: TourVoteRow[] = [];
   let metaSpendToday = 0;
+  let metaDailyRows: MetaDailyRow[] = [];
 
   try {
     votes = await prisma.tourVote.findMany({
@@ -134,6 +151,20 @@ export default async function TourVotePage() {
     });
   } catch {
     votes = [];
+  }
+
+  try {
+    metaDailyRows = await prisma.metaDaily.findMany({
+      select: {
+        date: true,
+        spend: true,
+      },
+      orderBy: {
+        date: "desc",
+      },
+    });
+  } catch {
+    metaDailyRows = [];
   }
 
   try {
@@ -156,8 +187,14 @@ export default async function TourVotePage() {
   const cityLeaderboard = getCityLeaderboard(votes);
   const countryLeaderboard = getCountryLeaderboard(votes);
 
+  const historicMetaSpend = getHistoricMetaSpendExcludingToday(metaDailyRows);
+  const totalMetaSpend = historicMetaSpend + metaSpendToday;
+
   const costPerSignupToday =
     todayCount > 0 ? metaSpendToday / todayCount : 0;
+
+  const costPerSignupTotal =
+    totalVotes > 0 ? totalMetaSpend / totalVotes : 0;
 
   return (
     <main className="min-h-screen bg-[#07090f] text-white">
@@ -171,11 +208,11 @@ export default async function TourVotePage() {
               ← Back to Mission Control
             </Link>
             <h1 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-              Tour Vote / Signups
+              Tour Vote
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400 sm:text-base">
-              Demand signal from the tour vote landing page, stored directly in
-              Mission Control and ready to compare against live Meta spend.
+              Pre-tour data collection from the vote landing page, combined with
+              Meta spend so you can track demand and cost per signup.
             </p>
           </div>
 
@@ -209,27 +246,49 @@ export default async function TourVotePage() {
             }
           />
           <KpiCard
-            title="Cost per signup today"
+            title="Meta spend today"
+            value={money(metaSpendToday)}
+            subtitle="Live Meta snapshot"
+          />
+          <KpiCard
+            title="Meta spend total"
+            value={money(totalMetaSpend)}
+            subtitle={`${money(historicMetaSpend)} historic + ${money(metaSpendToday)} today`}
+          />
+          <KpiCard
+            title="Cost / signup today"
             value={todayCount > 0 ? money(costPerSignupToday) : "—"}
             subtitle={
               todayCount > 0
-                ? `${money(metaSpendToday)} spend / ${todayCount} signups`
+                ? `${money(metaSpendToday)} / ${todayCount} signups`
                 : "Waiting for today's first signup"
             }
+          />
+          <KpiCard
+            title="Cost / signup total"
+            value={totalVotes > 0 ? money(costPerSignupTotal) : "—"}
+            subtitle={
+              totalVotes > 0
+                ? `${money(totalMetaSpend)} / ${totalVotes} total signups`
+                : "No signups yet"
+            }
+          />
+          <KpiCard
+            title="Signups 7d"
+            value={String(sevenDayCount)}
+            subtitle={`${String(thirtyDayCount)} in the last 30 days`}
           />
         </section>
 
         <section className="mt-8 grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
           <div className="rounded-3xl border border-white/10 bg-zinc-950/80 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.35)] backdrop-blur">
-            <div className="mb-5 flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold tracking-tight text-white">
-                  City leaderboard
-                </h2>
-                <p className="mt-1 text-sm text-zinc-400">
-                  Ranked by total signups captured from the landing page.
-                </p>
-              </div>
+            <div className="mb-5">
+              <h2 className="text-xl font-semibold tracking-tight text-white">
+                City leaderboard
+              </h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Ranked by total signups captured from the tour vote page.
+              </p>
             </div>
 
             <div className="overflow-hidden rounded-2xl border border-white/10">
@@ -256,7 +315,7 @@ export default async function TourVotePage() {
                           : "0%";
 
                       return (
-                        <tr key={row.city} className="bg-transparent">
+                        <tr key={row.city}>
                           <td className="px-4 py-3 text-white">{row.city}</td>
                           <td className="px-4 py-3 text-zinc-300">{row.count}</td>
                           <td className="px-4 py-3 text-zinc-400">{share}</td>
@@ -275,7 +334,7 @@ export default async function TourVotePage() {
                 Country split
               </h2>
               <p className="mt-1 text-sm text-zinc-400">
-                Useful for broad market demand before you zoom into cities.
+                Broad market demand before you zoom into cities.
               </p>
 
               <div className="mt-4 space-y-3">
@@ -302,7 +361,7 @@ export default async function TourVotePage() {
                 Recent signups
               </h2>
               <p className="mt-1 text-sm text-zinc-400">
-                Latest submissions captured by the tour vote page.
+                Latest submissions from the landing page.
               </p>
 
               <div className="mt-4 space-y-3">
