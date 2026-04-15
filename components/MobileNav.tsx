@@ -82,6 +82,13 @@ export default function MobileNav() {
               >
                 Tour
               </Link>
+              <Link
+                href="/tour-vote"
+                className="text-base text-white/90 hover:text-white"
+                onClick={closeMenu}
+              >
+                Tour Vote
+              </Link>
             </nav>
           </div>
         </>

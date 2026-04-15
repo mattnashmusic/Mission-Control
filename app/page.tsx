@@ -1,5 +1,5 @@
 import SyncButton from "@/components/SyncButton";
-import Link from "next/link";
+import Link from "@/components/MobileNav";
 import { prisma } from "@/lib/prisma";
 import { getMetaSnapshot } from "@/lib/meta";
 import { calculateShippingCost } from "@/utils/shipping";
@@ -27,6 +27,12 @@ type DbDashboardCustomer = {
   id: string;
   createdAt: string;
   email: string;
+};
+
+type DbTourVote = {
+  id: string;
+  createdAt: string;
+  selectedCity: string;
 };
 
 function money(value: number) {
@@ -94,6 +100,24 @@ function filterCustomersSince(
     if (customer.email.trim() === "") return false;
     return new Date(customer.createdAt) >= startDate;
   });
+}
+
+function filterTourVotesByDateKeys(votes: DbTourVote[], dateKeys: Set<string>) {
+  return votes.filter((vote) => dateKeys.has(getDateKey(vote.createdAt)));
+}
+
+function getTopCity(votes: DbTourVote[]) {
+  if (votes.length === 0) {
+    return "—";
+  }
+
+  const cityCounts = new Map<string, number>();
+
+  for (const vote of votes) {
+    cityCounts.set(vote.selectedCity, (cityCounts.get(vote.selectedCity) || 0) + 1);
+  }
+
+  return [...cityCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
 }
 
 function calculateRevenue(orders: DbDashboardOrder[]) {
@@ -207,7 +231,7 @@ function HubCard({
   stats: Array<{ label: string; value: string; valueClassName?: string }>;
 }) {
   return (
-    <Link
+    <a
       href={href}
       className="group rounded-3xl border border-zinc-800 bg-zinc-900/90 p-6 transition duration-200 hover:border-zinc-700 hover:bg-zinc-900 hover:shadow-[0_0_0_1px_rgba(255,255,255,0.03)]"
     >
@@ -240,13 +264,14 @@ function HubCard({
       <div className="mt-6 text-sm font-medium text-zinc-500 transition group-hover:text-zinc-300">
         Open →
       </div>
-    </Link>
+    </a>
   );
 }
 
 export default async function Home() {
   let orders: DbDashboardOrder[] = [];
   let customers: DbDashboardCustomer[] = [];
+  let tourVotes: DbTourVote[] = [];
   let metaSpendToday = 0;
 
   try {
@@ -290,6 +315,24 @@ export default async function Home() {
   }
 
   try {
+    const dbTourVotes = await prisma.tourVote.findMany({
+      select: {
+        id: true,
+        createdAt: true,
+        selectedCity: true,
+      },
+    });
+
+    tourVotes = dbTourVotes.map((vote) => ({
+      id: vote.id,
+      createdAt: vote.createdAt.toISOString(),
+      selectedCity: vote.selectedCity,
+    }));
+  } catch {
+    tourVotes = [];
+  }
+
+  try {
     const metaData = await getMetaSnapshot();
     metaSpendToday = metaData.spend.today;
   } catch {
@@ -325,12 +368,20 @@ export default async function Home() {
   const daysRunning = daysBetweenInclusive(fshStartDate, new Date());
   const avgEmailsPerDay = daysRunning > 0 ? emailTotal / daysRunning : 0;
 
+  const tourVotesToday = filterTourVotesByDateKeys(
+    tourVotes,
+    buildRecentDateKeySet(1)
+  ).length;
+  const totalTourVotes = tourVotes.length;
+  const topTourVoteCity = getTopCity(tourVotes);
+
   const daysToNextTour = daysUntil(NEXT_TOUR_DATE);
   const avgTicketsPerShow =
     UPCOMING_SHOWS > 0 ? TICKETS_SOLD / UPCOMING_SHOWS : 0;
 
   return (
     <main className="min-h-screen bg-zinc-950 text-white">
+      <MobileNav />
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-12">
         <header className="mb-14 text-center">
           <p className="mb-3 text-sm uppercase tracking-[0.35em] text-zinc-500">
@@ -341,11 +392,11 @@ export default async function Home() {
           </h1>
           <p className="mt-4 text-lg text-zinc-400">Artist: Matt Nash</p>
           <div className="mt-6 flex justify-center">
-
-</div>
+            <SyncButton />
+          </div>
         </header>
 
-        <section className="mx-auto grid w-full max-w-5xl gap-6 md:grid-cols-3">
+        <section className="mx-auto grid w-full max-w-5xl gap-6 md:grid-cols-2 xl:grid-cols-4">
           <HubCard
             href="/fsh"
             emoji="🎣"
@@ -423,10 +474,35 @@ export default async function Home() {
               },
             ]}
           />
+
+          <HubCard
+            href="/tour-vote"
+            emoji="🗳️"
+            title="Tour Vote / Signups"
+            subtitle="Presale demand signals"
+            stats={[
+              {
+                label: "Total Signups",
+                value: String(totalTourVotes),
+              },
+              {
+                label: "Today",
+                value: String(tourVotesToday),
+              },
+              {
+                label: "Top City",
+                value: topTourVoteCity,
+              },
+              {
+                label: "Meta Spend Today",
+                value: money(metaSpendToday),
+              },
+            ]}
+          />
         </section>
 
         <div className="mt-14 text-center text-sm text-zinc-500">
-          Central hub for FSH, email growth, and touring.
+          Central hub for FSH, email growth, touring, and tour vote demand.
         </div>
       </div>
     </main>
