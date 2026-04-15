@@ -1,5 +1,5 @@
 import SyncButton from "@/components/SyncButton";
-import Link from "@/components/MobileNav";
+import MobileNav from "@/components/MobileNav";
 import { prisma } from "@/lib/prisma";
 import { getMetaSnapshot } from "@/lib/meta";
 import { calculateShippingCost } from "@/utils/shipping";
