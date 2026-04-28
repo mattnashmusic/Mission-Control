@@ -17,11 +17,6 @@ type TourVoteRow = {
   createdAt: Date;
 };
 
-type MetaDailyRow = {
-  date: Date;
-  spend: number;
-};
-
 function money(value: number) {
   return new Intl.NumberFormat("en-GB", {
     style: "currency",
@@ -106,17 +101,6 @@ function getCountryLeaderboard(votes: TourVoteRow[]) {
     .sort((a, b) => b.count - a.count);
 }
 
-function getHistoricMetaSpendExcludingToday(rows: MetaDailyRow[]) {
-  const todayKey = getDateKey(new Date());
-
-  return rows.reduce((sum, row) => {
-    if (getDateKey(row.date) === todayKey) {
-      return sum;
-    }
-    return sum + (row.spend || 0);
-  }, 0);
-}
-
 function KpiCard({
   title,
   value,
@@ -144,7 +128,7 @@ function KpiCard({
 export default async function TourVotePage() {
   let votes: TourVoteRow[] = [];
   let metaSpendToday = 0;
-  let metaDailyRows: MetaDailyRow[] = [];
+  let metaSpendTotal = 0;
 
   try {
     votes = await prisma.tourVote.findMany({
@@ -155,24 +139,12 @@ export default async function TourVotePage() {
   }
 
   try {
-    metaDailyRows = await prisma.metaDaily.findMany({
-      select: {
-        date: true,
-        spend: true,
-      },
-      orderBy: {
-        date: "desc",
-      },
-    });
-  } catch {
-    metaDailyRows = [];
-  }
-
-  try {
     const meta = await getTourMetaSnapshot(TOUR_VOTE_CAMPAIGN_ID);
-    metaSpendToday = typeof meta?.spend === "number" ? meta.spend : 0;
+    metaSpendToday = typeof meta?.spend?.today === "number" ? meta.spend.today : 0;
+    metaSpendTotal = typeof meta?.spend?.lifetime === "number" ? meta.spend.lifetime : 0;
   } catch {
     metaSpendToday = 0;
+    metaSpendTotal = 0;
   }
 
   const todayVotes = filterVotesByDateKeys(votes, buildRecentDateKeySet(1));
@@ -188,8 +160,7 @@ export default async function TourVotePage() {
   const cityLeaderboard = getCityLeaderboard(votes);
   const countryLeaderboard = getCountryLeaderboard(votes);
 
-  const historicMetaSpend = getHistoricMetaSpendExcludingToday(metaDailyRows);
-  const totalMetaSpend = historicMetaSpend + metaSpendToday;
+  const totalMetaSpend = metaSpendTotal;
 
   const costPerSignupToday =
     todayCount > 0 ? metaSpendToday / todayCount : 0;
@@ -254,7 +225,7 @@ export default async function TourVotePage() {
           <KpiCard
             title="Meta spend total"
             value={money(totalMetaSpend)}
-            subtitle={`${money(historicMetaSpend)} historic + ${money(metaSpendToday)} today`}
+            subtitle={`Tour campaign lifetime from Meta`}
           />
           <KpiCard
             title="Cost / signup today"
