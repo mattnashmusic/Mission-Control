@@ -1,5 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
-import { waitUntil } from "@vercel/functions";
+import { after, NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -173,7 +172,7 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      waitUntil(
+      after(() => {
         pushTourVoteToMailerLite({
           name,
           email,
@@ -184,8 +183,8 @@ export async function POST(req: NextRequest) {
           source,
         }).catch((error) => {
           console.error("MailerLite push failed:", error);
-        })
-      );
+        });
+      });
 
       return jsonResponse(
         {
