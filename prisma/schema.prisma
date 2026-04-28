@@ -163,3 +163,19 @@ model CogsCostEntry {
   @@index([category])
   @@index([effectiveFrom])
 }
+model ShippingCostEntry {
+  id              String   @id @default(cuid())
+  countryCode     String
+  countryName     String
+  cd1OnlyCost     Float?
+  cdPackageCost   Float
+  vinylCost       Float
+  vinylIncludesCds Boolean @default(false)
+  effectiveFrom   DateTime
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([countryCode])
+  @@index([effectiveFrom])
+}
