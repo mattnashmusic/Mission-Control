@@ -52,6 +52,10 @@ function getErrorMessage(error: unknown): string {
   }
 }
 
+function escapeJson(value: string): string {
+  return JSON.stringify(value);
+}
+
 async function pushTourVoteToMailerLite({
   name,
   email,
@@ -82,6 +86,19 @@ async function pushTourVoteToMailerLite({
     };
   }
 
+  const payload = `{
+    "email": ${escapeJson(email)},
+    "fields": {
+      "name": ${escapeJson(name)},
+      "tour_vote_city": ${escapeJson(selectedCity)},
+      "tour_vote_country": ${escapeJson(selectedCountry)},
+      "tour_vote_inferred_city": ${escapeJson(inferredCity)},
+      "tour_vote_inferred_country": ${escapeJson(inferredCountry)},
+      "tour_vote_source": ${escapeJson(source)}
+    },
+    "groups": [${groupId}]
+  }`;
+
   const response = await fetch("https://connect.mailerlite.com/api/subscribers", {
     method: "POST",
     headers: {
@@ -89,18 +106,7 @@ async function pushTourVoteToMailerLite({
       Accept: "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      email,
-      fields: {
-        name,
-        tour_vote_city: selectedCity,
-        tour_vote_country: selectedCountry,
-        tour_vote_inferred_city: inferredCity,
-        tour_vote_inferred_country: inferredCountry,
-        tour_vote_source: source,
-      },
-      groups: [Number(groupId)],
-    }),
+    body: payload,
   });
 
   const text = await response.text();
@@ -109,7 +115,7 @@ async function pushTourVoteToMailerLite({
     ok: response.ok,
     status: response.status,
     response: text,
-    groupId: Number(groupId),
+    groupId,
   };
 }
 
