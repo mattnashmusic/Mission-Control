@@ -101,7 +101,7 @@ async function pushTourVoteToMailerLite({
         tour_vote_inferred_country: inferredCountry,
         tour_vote_source: source,
       },
-      groups: [groupId],
+      groups: [Number(groupId)],
     }),
   });
 
