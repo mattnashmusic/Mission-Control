@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { createCostEntry } from "./actions";
+import { createCostEntry, deleteCostEntry } from "./actions";
+
+export const dynamic = "force-dynamic";
 
 const COST_ITEMS = [
   { itemKey: "cd1", itemName: "CD1", category: "Product" },
@@ -196,12 +198,13 @@ export default async function CogsPage() {
                   <th className="py-3 pr-4">Unit Cost</th>
                   <th className="py-3 pr-4">Effective From</th>
                   <th className="py-3 pr-4">Notes</th>
+                  <th className="py-3 pr-4 text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {entries.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-6 text-zinc-500">
+                    <td colSpan={6} className="py-6 text-zinc-500">
                       No COGS entries yet.
                     </td>
                   </tr>
@@ -222,6 +225,17 @@ export default async function CogsPage() {
                       </td>
                       <td className="py-3 pr-4 text-zinc-500">
                         {entry.notes || "—"}
+                      </td>
+                      <td className="py-3 pr-4 text-right">
+                        <form action={deleteCostEntry}>
+                          <input type="hidden" name="id" value={entry.id} />
+                          <button
+                            type="submit"
+                            className="rounded-lg border border-red-900/60 px-3 py-1 text-xs text-red-400 hover:border-red-500 hover:text-red-300"
+                          >
+                            Delete
+                          </button>
+                        </form>
                       </td>
                     </tr>
                   ))

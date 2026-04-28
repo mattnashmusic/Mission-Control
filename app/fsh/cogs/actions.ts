@@ -32,3 +32,17 @@ export async function createCostEntry(formData: FormData) {
 
   revalidatePath("/fsh/cogs");
 }
+
+export async function deleteCostEntry(formData: FormData) {
+  const id = String(formData.get("id") || "").trim();
+
+  if (!id) {
+    throw new Error("Missing COGS entry ID.");
+  }
+
+  await prisma.cogsCostEntry.delete({
+    where: { id },
+  });
+
+  revalidatePath("/fsh/cogs");
+}
