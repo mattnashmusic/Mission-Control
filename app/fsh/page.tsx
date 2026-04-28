@@ -968,12 +968,29 @@ export default async function Home() {
             </div>
 
             <div className="flex w-full flex-col gap-4 lg:w-[320px] lg:min-w-[320px] lg:max-w-[320px] lg:flex-none">
-              <div className="flex flex-col items-start lg:items-end">
-                <SyncButton />
-                <span className="mt-1 text-xs text-zinc-500">
-                  Last synced: {formatLastSynced(lastSyncValue?.finishedAt ?? null)}
-                </span>
-              </div>
+              <div className="flex flex-col items-start gap-2 lg:items-end">
+  <div className="flex flex-wrap items-center gap-2">
+    <a
+      href="/fsh/cogs"
+      className="rounded-xl border border-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:border-zinc-600 hover:text-white"
+    >
+      COGS
+    </a>
+
+    <a
+      href="/fsh/shipping"
+      className="rounded-xl border border-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:border-zinc-600 hover:text-white"
+    >
+      Shipping
+    </a>
+
+    <SyncButton />
+  </div>
+
+  <span className="text-xs text-zinc-500">
+    Last synced: {formatLastSynced(lastSyncValue?.finishedAt ?? null)}
+  </span>
+</div>
 
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 p-4 lg:ml-auto lg:w-[320px]">
                 <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
