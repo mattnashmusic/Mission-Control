@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -24,9 +25,7 @@ const ALLOWED_ORIGINS = new Set([
 
 function buildCorsHeaders(origin?: string | null): Record<string, string> {
   const allowedOrigin =
-    origin && ALLOWED_ORIGINS.has(origin)
-      ? origin
-      : "https://mattnash.com";
+    origin && ALLOWED_ORIGINS.has(origin) ? origin : "https://mattnash.com";
 
   return {
     "Access-Control-Allow-Origin": allowedOrigin,
@@ -52,6 +51,7 @@ function isValidEmail(email: string): boolean {
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
+
   try {
     return JSON.stringify(error);
   } catch {
@@ -105,10 +105,14 @@ async function pushTourVoteToMailerLite({
     }),
   });
 
+  const responseText = await response.text();
+
   if (!response.ok) {
-    const errorText = await response.text();
-    console.error("MailerLite API error:", response.status, errorText);
+    console.error("MailerLite API error:", response.status, responseText);
+    return;
   }
+
+  console.log("MailerLite tour vote synced:", response.status, email);
 }
 
 export async function OPTIONS(req: NextRequest) {
@@ -169,17 +173,19 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      pushTourVoteToMailerLite({
-        name,
-        email,
-        selectedCity,
-        selectedCountry,
-        inferredCity,
-        inferredCountry,
-        source,
-      }).catch((error) => {
-        console.error("MailerLite push failed:", error);
-      });
+      waitUntil(
+        pushTourVoteToMailerLite({
+          name,
+          email,
+          selectedCity,
+          selectedCountry,
+          inferredCity,
+          inferredCountry,
+          source,
+        }).catch((error) => {
+          console.error("MailerLite push failed:", error);
+        })
+      );
 
       return jsonResponse(
         {
