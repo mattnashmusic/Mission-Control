@@ -1,7 +1,8 @@
 import Link from "next/link";
 import SyncButton from "@/components/SyncButton";
 import { prisma } from "@/lib/prisma";
-import { getMetaSnapshot } from "@/lib/meta";
+import { getTourMetaSnapshot } from "@/lib/meta-tour";
+const TOUR_VOTE_CAMPAIGN_ID = "120238758856380724";
 
 const TIME_ZONE = "Europe/Amsterdam";
 
@@ -168,8 +169,8 @@ export default async function TourVotePage() {
   }
 
   try {
-    const meta = await getMetaSnapshot();
-    metaSpendToday = typeof meta?.spend?.today === "number" ? meta.spend.today : 0;
+    const meta = await getTourMetaSnapshot(TOUR_VOTE_CAMPAIGN_ID);
+    metaSpendToday = typeof meta?.spend === "number" ? meta.spend : 0;
   } catch {
     metaSpendToday = 0;
   }
