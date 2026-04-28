@@ -1,4 +1,4 @@
-import { after, NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -12,9 +12,6 @@ type TourVoteBody = {
   inferredCountry?: string;
   source?: string;
   eventId?: string;
-  pageUrl?: string;
-  referrer?: string;
-  userAgent?: string;
 };
 
 const ALLOWED_ORIGINS = new Set([
@@ -38,10 +35,7 @@ function jsonResponse(
   status: number,
   headers: Record<string, string>
 ) {
-  return NextResponse.json(body, {
-    status,
-    headers,
-  });
+  return NextResponse.json(body, { status, headers });
 }
 
 function isValidEmail(email: string): boolean {
@@ -79,8 +73,13 @@ async function pushTourVoteToMailerLite({
   const groupId = process.env.MAILERLITE_TOUR_VOTE_GROUP_ID;
 
   if (!apiKey || !groupId) {
-    console.error("MailerLite env vars missing");
-    return;
+    return {
+      ok: false,
+      status: 0,
+      message: "MailerLite env vars missing",
+      hasApiKey: Boolean(apiKey),
+      hasGroupId: Boolean(groupId),
+    };
   }
 
   const response = await fetch("https://connect.mailerlite.com/api/subscribers", {
@@ -104,14 +103,14 @@ async function pushTourVoteToMailerLite({
     }),
   });
 
-  const responseText = await response.text();
+  const text = await response.text();
 
-  if (!response.ok) {
-    console.error("MailerLite API error:", response.status, responseText);
-    return;
-  }
-
-  console.log("MailerLite tour vote synced:", response.status, email);
+  return {
+    ok: response.ok,
+    status: response.status,
+    response: text,
+    groupId: Number(groupId),
+  };
 }
 
 export async function OPTIONS(req: NextRequest) {
@@ -156,57 +155,40 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    try {
-      const savedVote = await prisma.tourVote.create({
-        data: {
-          name,
-          email,
-          selectedCity,
-          selectedCountry,
-          inferredCity: inferredCity || null,
-          inferredCountry: inferredCountry || null,
-          source,
-        },
-        select: {
-          id: true,
-        },
-      });
+    const savedVote = await prisma.tourVote.create({
+      data: {
+        name,
+        email,
+        selectedCity,
+        selectedCountry,
+        inferredCity: inferredCity || null,
+        inferredCountry: inferredCountry || null,
+        source,
+      },
+      select: {
+        id: true,
+      },
+    });
 
-      after(() => {
-        pushTourVoteToMailerLite({
-          name,
-          email,
-          selectedCity,
-          selectedCountry,
-          inferredCity,
-          inferredCountry,
-          source,
-        }).catch((error) => {
-          console.error("MailerLite push failed:", error);
-        });
-      });
+    const mailerLiteResult = await pushTourVoteToMailerLite({
+      name,
+      email,
+      selectedCity,
+      selectedCountry,
+      inferredCity,
+      inferredCountry,
+      source,
+    });
 
-      return jsonResponse(
-        {
-          ok: true,
-          id: savedVote.id,
-        },
-        200,
-        headers
-      );
-    } catch (error) {
-      console.error("Tour vote DB error:", error);
-
-      return jsonResponse(
-        {
-          ok: false,
-          error: "DB write failed",
-          details: getErrorMessage(error),
-        },
-        500,
-        headers
-      );
-    }
+    return jsonResponse(
+      {
+        ok: true,
+        id: savedVote.id,
+        mailerLite: mailerLiteResult,
+      },
+      200,
+      headers
+    );
   } catch (error) {
     console.error("Tour vote route fatal error:", error);
 
