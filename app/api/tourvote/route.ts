@@ -59,6 +59,58 @@ function getErrorMessage(error: unknown): string {
   }
 }
 
+async function pushTourVoteToMailerLite({
+  name,
+  email,
+  selectedCity,
+  selectedCountry,
+  inferredCity,
+  inferredCountry,
+  source,
+}: {
+  name: string;
+  email: string;
+  selectedCity: string;
+  selectedCountry: string;
+  inferredCity: string;
+  inferredCountry: string;
+  source: string;
+}) {
+  const apiKey = process.env.MAILERLITE_API_KEY;
+  const groupId = process.env.MAILERLITE_TOUR_VOTE_GROUP_ID;
+
+  if (!apiKey || !groupId) {
+    console.error("MailerLite env vars missing");
+    return;
+  }
+
+  const response = await fetch("https://connect.mailerlite.com/api/subscribers", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      email,
+      fields: {
+        name,
+        tour_vote_city: selectedCity,
+        tour_vote_country: selectedCountry,
+        tour_vote_inferred_city: inferredCity,
+        tour_vote_inferred_country: inferredCountry,
+        tour_vote_source: source,
+      },
+      groups: [groupId],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("MailerLite API error:", response.status, errorText);
+  }
+}
+
 export async function OPTIONS(req: NextRequest) {
   const origin = req.headers.get("origin");
   const headers = buildCorsHeaders(origin);
@@ -115,6 +167,18 @@ export async function POST(req: NextRequest) {
         select: {
           id: true,
         },
+      });
+
+      pushTourVoteToMailerLite({
+        name,
+        email,
+        selectedCity,
+        selectedCountry,
+        inferredCity,
+        inferredCountry,
+        source,
+      }).catch((error) => {
+        console.error("MailerLite push failed:", error);
       });
 
       return jsonResponse(

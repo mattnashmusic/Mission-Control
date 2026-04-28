@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import fs from "node:fs/promises";
-import path from "node:path";
+import { prisma } from "@/lib/prisma";
 import { calculateClusterShares } from "@/lib/email/audience";
 
 type RawRow = {
@@ -8,6 +7,7 @@ type RawRow = {
   country: string;
   city: string;
   zip: string;
+  source: "mailerlite" | "shopify" | "abandoned";
 };
 
 type GeocodedCluster = {
@@ -17,6 +17,60 @@ type GeocodedCluster = {
   lng: number;
   count: number;
   emails: string[];
+};
+
+type MailerLiteSubscriber = {
+  id: string;
+  email: string;
+  status: string;
+  fields?: Record<string, string | null>;
+};
+
+type MailerLiteListResponse = {
+  data?: MailerLiteSubscriber[];
+  meta?: {
+    next_cursor?: string | null;
+  };
+};
+
+type ShopifyCustomerRow = {
+  id: string;
+  email: string | null;
+  country: string | null;
+  countryCode: string | null;
+  rawJson: unknown;
+};
+
+type ShopifyAbandonedCheckout = {
+  id?: number | string;
+  email?: string | null;
+  abandoned_checkout_url?: string | null;
+  created_at?: string | null;
+  billing_address?: {
+    city?: string | null;
+    country?: string | null;
+    country_code?: string | null;
+    zip?: string | null;
+  } | null;
+  shipping_address?: {
+    city?: string | null;
+    country?: string | null;
+    country_code?: string | null;
+    zip?: string | null;
+  } | null;
+  customer?: {
+    email?: string | null;
+    default_address?: {
+      city?: string | null;
+      country?: string | null;
+      country_code?: string | null;
+      zip?: string | null;
+    } | null;
+  } | null;
+};
+
+type ShopifyAbandonedCheckoutResponse = {
+  checkouts?: ShopifyAbandonedCheckout[];
 };
 
 const geocodeCache = new Map<string, { lat: number; lng: number } | null>();
@@ -43,29 +97,27 @@ const COUNTRY_NAME_TO_CODE: Record<string, string> = {
 
 export async function GET() {
   try {
-    const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-
-    if (!token) {
+    const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+    if (!mapboxToken) {
       return new NextResponse("Missing NEXT_PUBLIC_MAPBOX_TOKEN in .env.local", {
         status: 500,
       });
     }
 
-    const filePath = path.join(process.cwd(), "data", "subscribers_active.csv");
-    const rawFile = await fs.readFile(filePath, "utf8");
+    const [mailerLiteRows, shopifyRows, abandonedRows] = await Promise.all([
+      fetchMailerLiteActiveSubscribers(),
+      fetchShopifyAudienceRows(),
+      fetchShopifyAbandonedCheckoutRows(),
+    ]);
 
-    const rows = parseTsv(rawFile);
-
-    const cleanedRows = rows
-      .map(normalizeRow)
-      .filter((row): row is RawRow => row !== null);
+    const merged = mergeAudienceRows(mailerLiteRows, shopifyRows, abandonedRows);
 
     const grouped = new Map<
       string,
       { city: string; country: string; count: number; emails: string[] }
     >();
 
-    for (const row of cleanedRows) {
+    for (const row of merged.usableRows) {
       const key = `${row.city}__${row.country}`;
       const existing = grouped.get(key);
 
@@ -85,7 +137,7 @@ export async function GET() {
     const uniqueCities = Array.from(grouped.values());
 
     const geocoded = await mapWithConcurrency(uniqueCities, 5, async (item) => {
-      const coords = await geocodeCity(item.city, item.country, token);
+      const coords = await geocodeCity(item.city, item.country, mapboxToken);
       if (!coords) return null;
 
       return {
@@ -105,9 +157,9 @@ export async function GET() {
     return NextResponse.json({
       clusters,
       stats: {
-        totalRows: rows.length,
-        usableRows: cleanedRows.length,
-        skippedRows: rows.length - cleanedRows.length,
+        totalRows: merged.totalSourceRows,
+        usableRows: merged.usableRows.length,
+        skippedRows: merged.totalSourceRows - merged.usableRows.length,
         uniqueCities: uniqueCities.length,
       },
     });
@@ -119,75 +171,283 @@ export async function GET() {
   }
 }
 
-function parseTsv(input: string) {
-  const lines = input
-    .replace(/\r/g, "")
-    .split("\n")
-    .filter((line) => line.trim().length > 0);
+async function fetchMailerLiteActiveSubscribers(): Promise<RawRow[]> {
+  const token =
+    process.env.MAILERLITE_API_TOKEN ||
+    process.env.MAILERLITE_TOKEN ||
+    process.env.MAILERLITE_API_KEY;
 
-  if (lines.length < 2) return [];
+  if (!token) {
+    throw new Error(
+      "Missing MAILERLITE_API_TOKEN (or MAILERLITE_TOKEN / MAILERLITE_API_KEY)"
+    );
+  }
 
-  const headers = splitTsvLine(lines[0]).map((header) => header.trim());
+  const rows: RawRow[] = [];
+  let cursor: string | null = null;
 
-  return lines.slice(1).map((line) => {
-    const values = splitTsvLine(line);
-    const row: Record<string, string> = {};
+  while (true) {
+    const url = new URL("https://connect.mailerlite.com/api/subscribers");
+    url.searchParams.set("filter[status]", "active");
+    url.searchParams.set("limit", "100");
 
-    headers.forEach((header, index) => {
-      row[header] = values[index] ?? "";
+    if (cursor) {
+      url.searchParams.set("cursor", cursor);
+    }
+
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
     });
 
-    return row;
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`MailerLite fetch failed: ${response.status} ${text}`);
+    }
+
+    const json = (await response.json()) as MailerLiteListResponse;
+    const subscribers = json.data ?? [];
+
+    for (const subscriber of subscribers) {
+      const email = normalizeEmail(subscriber.email);
+      if (!email) continue;
+
+      const fields = subscriber.fields ?? {};
+      const city = normalizeCity(
+        readFirstString(fields.city, fields.City, fields.town, fields.Town)
+      );
+      const country = normalizeCountry(
+        readFirstString(fields.country, fields.Country, fields.location, fields.Location)
+      );
+      const zip = readFirstString(
+        fields.z_i_p,
+        fields.zip,
+        fields.Zip,
+        fields.postcode,
+        fields.Postcode
+      ).trim();
+
+      rows.push({
+        email,
+        city,
+        country,
+        zip,
+        source: "mailerlite",
+      });
+    }
+
+    cursor = json.meta?.next_cursor ?? null;
+    if (!cursor) break;
+  }
+
+  return rows;
+}
+
+async function fetchShopifyAudienceRows(): Promise<RawRow[]> {
+  const customers = await prisma.shopifyCustomer.findMany({
+    select: {
+      id: true,
+      email: true,
+      country: true,
+      countryCode: true,
+      rawJson: true,
+    },
   });
+
+  return customers
+    .map(mapShopifyCustomerToAudienceRow)
+    .filter((row): row is RawRow => row !== null);
 }
 
-function splitTsvLine(line: string) {
-  const result: string[] = [];
-  let current = "";
-  let inQuotes = false;
+function mapShopifyCustomerToAudienceRow(
+  customer: ShopifyCustomerRow
+): RawRow | null {
+  const email = normalizeEmail(customer.email);
+  if (!email) return null;
 
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
-    const next = line[i + 1];
+  const raw = isObject(customer.rawJson) ? customer.rawJson : null;
+  const defaultAddress = isObject(raw?.default_address) ? raw.default_address : null;
+  const addresses = Array.isArray(raw?.addresses) ? raw.addresses : [];
+  const firstAddress = addresses.find(isObject) ?? null;
 
-    if (char === '"') {
-      if (inQuotes && next === '"') {
-        current += '"';
-        i += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
+  const city = normalizeCity(readFirstString(defaultAddress?.city, firstAddress?.city));
+  const country = normalizeCountry(
+    readFirstString(
+      customer.country,
+      customer.countryCode,
+      defaultAddress?.country,
+      defaultAddress?.country_name,
+      defaultAddress?.country_code,
+      firstAddress?.country,
+      firstAddress?.country_name,
+      firstAddress?.country_code
+    )
+  );
+  const zip = readFirstString(defaultAddress?.zip, firstAddress?.zip).trim();
+
+  return {
+    email,
+    city,
+    country,
+    zip,
+    source: "shopify",
+  };
+}
+
+async function fetchShopifyAbandonedCheckoutRows(): Promise<RawRow[]> {
+  const storeDomain = process.env.SHOPIFY_STORE_DOMAIN;
+  const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
+
+  if (!storeDomain || !accessToken) {
+    throw new Error("Missing SHOPIFY_STORE_DOMAIN or SHOPIFY_ACCESS_TOKEN");
+  }
+
+  const rows: RawRow[] = [];
+  let pageInfoUrl: string | null = `https://${storeDomain}/admin/api/2026-01/checkouts.json?limit=250`;
+
+  while (pageInfoUrl) {
+    const response = await fetch(pageInfoUrl, {
+      method: "GET",
+      headers: {
+        "X-Shopify-Access-Token": accessToken,
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Shopify abandoned checkouts fetch failed: ${response.status} ${text}`);
+    }
+
+    const json = (await response.json()) as ShopifyAbandonedCheckoutResponse;
+    const checkouts = json.checkouts ?? [];
+
+    for (const checkout of checkouts) {
+      const row = mapAbandonedCheckoutToAudienceRow(checkout);
+      if (row) rows.push(row);
+    }
+
+    pageInfoUrl = getNextLinkFromHeader(response.headers.get("link"));
+  }
+
+  return rows;
+}
+
+function mapAbandonedCheckoutToAudienceRow(
+  checkout: ShopifyAbandonedCheckout
+): RawRow | null {
+  const email = normalizeEmail(
+    checkout.email || checkout.customer?.email || ""
+  );
+  if (!email) return null;
+
+  const shipping = checkout.shipping_address ?? null;
+  const billing = checkout.billing_address ?? null;
+  const customerDefault = checkout.customer?.default_address ?? null;
+
+  const city = normalizeCity(
+    readFirstString(shipping?.city, billing?.city, customerDefault?.city)
+  );
+
+  const country = normalizeCountry(
+    readFirstString(
+      shipping?.country,
+      shipping?.country_code,
+      billing?.country,
+      billing?.country_code,
+      customerDefault?.country,
+      customerDefault?.country_code
+    )
+  );
+
+  const zip = readFirstString(
+    shipping?.zip,
+    billing?.zip,
+    customerDefault?.zip
+  ).trim();
+
+  return {
+    email,
+    city,
+    country,
+    zip,
+    source: "abandoned",
+  };
+}
+
+function mergeAudienceRows(
+  mailerLiteRows: RawRow[],
+  shopifyRows: RawRow[],
+  abandonedRows: RawRow[]
+): {
+  totalSourceRows: number;
+  usableRows: RawRow[];
+} {
+  const merged = new Map<string, RawRow>();
+
+  for (const row of [...abandonedRows, ...shopifyRows, ...mailerLiteRows]) {
+    const key = normalizeEmail(row.email);
+    if (!key) continue;
+
+    const existing = merged.get(key);
+
+    if (!existing) {
+      merged.set(key, { ...row, email: key });
       continue;
     }
 
-    if (char === "\t" && !inQuotes) {
-      result.push(current);
-      current = "";
-      continue;
+    const next: RawRow = {
+      email: key,
+      source:
+        existing.source === "mailerlite" || row.source === "mailerlite"
+          ? "mailerlite"
+          : existing.source === "shopify" || row.source === "shopify"
+          ? "shopify"
+          : "abandoned",
+      city: existing.city,
+      country: existing.country,
+      zip: existing.zip || row.zip,
+    };
+
+    if (!next.city && row.city) next.city = row.city;
+    if (!next.country && row.country) next.country = row.country;
+
+    if (
+      row.source === "mailerlite" &&
+      row.city &&
+      row.country &&
+      (!existing.city || !existing.country)
+    ) {
+      next.city = row.city;
+      next.country = row.country;
+      next.zip = row.zip || next.zip;
     }
 
-    current += char;
+    merged.set(key, next);
   }
 
-  result.push(current);
-  return result.map((value) => value.trim());
+  const usableRows = Array.from(merged.values()).filter(
+    (row) => !!row.email && !!row.city && !!row.country
+  );
+
+  return {
+    totalSourceRows: mailerLiteRows.length + shopifyRows.length + abandonedRows.length,
+    usableRows,
+  };
 }
 
-function normalizeRow(row: Record<string, string>): RawRow | null {
-  const email = (row["Subscriber"] || "").trim().toLowerCase();
-  const city = normalizeCity(row["City"] || "");
-  const country = normalizeCountry(row["Country"] || row["Location"] || "");
-  const zip = (row["Zip"] || "").trim();
-
-  if (!email || !city || !country) {
-    return null;
-  }
-
-  return { email, city, country, zip };
+function normalizeEmail(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
 }
 
-function normalizeCity(value: string) {
-  const trimmed = value.trim();
+function normalizeCity(value: string | null | undefined) {
+  const trimmed = (value ?? "").trim();
   if (!trimmed) return "";
 
   return trimmed
@@ -195,8 +455,8 @@ function normalizeCity(value: string) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function normalizeCountry(value: string) {
-  const trimmed = value.trim();
+function normalizeCountry(value: string | null | undefined) {
+  const trimmed = (value ?? "").trim();
   if (!trimmed) return "";
 
   const lower = trimmed.toLowerCase();
@@ -212,6 +472,32 @@ function normalizeCountry(value: string) {
   return trimmed
     .replace(/\s+/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function readFirstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function isObject(value: unknown): value is Record<string, any> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getNextLinkFromHeader(linkHeader: string | null): string | null {
+  if (!linkHeader) return null;
+
+  const parts = linkHeader.split(",");
+  for (const part of parts) {
+    const match = part.match(/<([^>]+)>;\s*rel="next"/);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+  return null;
 }
 
 async function geocodeCity(city: string, country: string, token: string) {
