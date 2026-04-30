@@ -328,11 +328,6 @@ export default async function TourVotePage() {
             }
           />
           <KpiCard
-            title="Meta spend today"
-            value={money(metaSpendToday)}
-            subtitle="Live Meta snapshot"
-          />
-          <KpiCard
             title="Meta spend total"
             value={money(totalMetaSpend)}
             subtitle={`Tour campaign lifetime from Meta`}
@@ -354,11 +349,6 @@ export default async function TourVotePage() {
                 ? `${money(totalMetaSpend)} / ${totalVotes} total signups`
                 : "No signups yet"
             }
-          />
-          <KpiCard
-            title="Signups 7d"
-            value={String(sevenDayCount)}
-            subtitle={`${String(thirtyDayCount)} in the last 30 days`}
           />
         </section>
 
