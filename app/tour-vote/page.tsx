@@ -2,6 +2,7 @@ import Link from "next/link";
 import SyncButton from "@/components/SyncButton";
 import { prisma } from "@/lib/prisma";
 import { getTourMetaSnapshot } from "@/lib/meta-tour";
+
 const TOUR_VOTE_CAMPAIGN_ID = "120242040988450724";
 
 const TIME_ZONE = "Europe/Amsterdam";
@@ -15,6 +16,14 @@ type TourVoteRow = {
   inferredCity: string | null;
   inferredCountry: string | null;
   createdAt: Date;
+};
+
+type ShopifyOrderForFshCheck = {
+  email: string | null;
+  lineItems: {
+    title: string;
+    sku: string | null;
+  }[];
 };
 
 function money(value: number) {
@@ -59,6 +68,77 @@ function buildRecentDateKeySet(days: number) {
 
 function filterVotesByDateKeys(votes: TourVoteRow[], dateKeys: Set<string>) {
   return votes.filter((vote) => dateKeys.has(getDateKey(vote.createdAt)));
+}
+
+function normalizeEmail(email: string | null | undefined) {
+  return email?.trim().toLowerCase() || "";
+}
+
+function isFshProduct(title: string, sku: string | null) {
+  const haystack = `${title} ${sku || ""}`.toLowerCase();
+
+  return (
+    haystack.includes("rebirth") ||
+    haystack.includes("deluxe") ||
+    haystack.includes("vinyl")
+  );
+}
+
+function buildFshEmailSet(orders: ShopifyOrderForFshCheck[]) {
+  const fshEmailSet = new Set<string>();
+
+  for (const order of orders) {
+    const email = normalizeEmail(order.email);
+    if (!email) continue;
+
+    const hasFshProduct = order.lineItems.some((item) =>
+      isFshProduct(item.title, item.sku)
+    );
+
+    if (hasFshProduct) {
+      fshEmailSet.add(email);
+    }
+  }
+
+  return fshEmailSet;
+}
+
+function getAudienceQuality(votes: TourVoteRow[], fshEmailSet: Set<string>) {
+  const tourVoteEmailSet = new Set<string>();
+
+  for (const vote of votes) {
+    const email = normalizeEmail(vote.email);
+    if (email) {
+      tourVoteEmailSet.add(email);
+    }
+  }
+
+  const totalUniqueTourVoteEmails = tourVoteEmailSet.size;
+  let fshOverlap = 0;
+
+  for (const email of tourVoteEmailSet) {
+    if (fshEmailSet.has(email)) {
+      fshOverlap += 1;
+    }
+  }
+
+  const nonFsh = totalUniqueTourVoteEmails - fshOverlap;
+  const nonFshPercent =
+    totalUniqueTourVoteEmails > 0
+      ? (nonFsh / totalUniqueTourVoteEmails) * 100
+      : 0;
+  const fshPercent =
+    totalUniqueTourVoteEmails > 0
+      ? (fshOverlap / totalUniqueTourVoteEmails) * 100
+      : 0;
+
+  return {
+    totalUniqueTourVoteEmails,
+    fshOverlap,
+    nonFsh,
+    nonFshPercent,
+    fshPercent,
+  };
 }
 
 function getTopCity(votes: TourVoteRow[]) {
@@ -127,6 +207,7 @@ function KpiCard({
 
 export default async function TourVotePage() {
   let votes: TourVoteRow[] = [];
+  let shopifyOrdersForFshCheck: ShopifyOrderForFshCheck[] = [];
   let metaSpendToday = 0;
   let metaSpendTotal = 0;
 
@@ -136,6 +217,22 @@ export default async function TourVotePage() {
     });
   } catch {
     votes = [];
+  }
+
+  try {
+    shopifyOrdersForFshCheck = await prisma.shopifyOrder.findMany({
+      select: {
+        email: true,
+        lineItems: {
+          select: {
+            title: true,
+            sku: true,
+          },
+        },
+      },
+    });
+  } catch {
+    shopifyOrdersForFshCheck = [];
   }
 
   try {
@@ -167,6 +264,9 @@ export default async function TourVotePage() {
 
   const costPerSignupTotal =
     totalVotes > 0 ? totalMetaSpend / totalVotes : 0;
+
+  const fshEmailSet = buildFshEmailSet(shopifyOrdersForFshCheck);
+  const audienceQuality = getAudienceQuality(votes, fshEmailSet);
 
   return (
     <main className="min-h-screen bg-[#07090f] text-white">
@@ -204,6 +304,16 @@ export default async function TourVotePage() {
             title="Total signups"
             value={String(totalVotes)}
             subtitle={`${thirtyDayCount} in the last 30 days`}
+          />
+          <KpiCard
+            title="New audience"
+            value={`${audienceQuality.nonFshPercent.toFixed(1)}%`}
+            subtitle={`${audienceQuality.nonFsh} / ${audienceQuality.totalUniqueTourVoteEmails} are not FSH customers`}
+          />
+          <KpiCard
+            title="FSH overlap"
+            value={`${audienceQuality.fshPercent.toFixed(1)}%`}
+            subtitle={`${audienceQuality.fshOverlap} existing FSH customers`}
           />
           <KpiCard
             title="Signups today"
