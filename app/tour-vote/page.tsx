@@ -3,7 +3,7 @@ import SyncButton from "@/components/SyncButton";
 import { prisma } from "@/lib/prisma";
 import { getTourMetaSnapshot } from "@/lib/meta-tour";
 
-const TOUR_VOTE_CAMPAIGN_ID = "120242040988450724";
+const TOUR_VOTE_CAMPAIGN_ID = "120243220166110724";
 
 const TIME_ZONE = "Europe/Amsterdam";
 
