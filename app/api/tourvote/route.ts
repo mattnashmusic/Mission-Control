@@ -15,6 +15,7 @@ type TourVoteBody = {
   pageUrl?: string;
   referrer?: string;
   userAgent?: string;
+  debugMailerLite?: boolean;
 };
 
 const ALLOWED_ORIGINS = new Set([
@@ -60,10 +61,9 @@ async function pushTourVoteToMailerLite(data: {
     process.env.MAILERLITE_TOUR_VOTE_GROUP_ID;
 
   if (!apiKey || !groupId) {
-    console.error(
+    throw new Error(
       "Missing MailerLite credentials or group ID"
     );
-    return;
   }
 
   const payload = {
@@ -98,29 +98,19 @@ async function pushTourVoteToMailerLite(data: {
     }
   );
 
-  if (!response.ok) {
-    const errorText = await response.text();
-
-    console.error(
-      "MailerLite API error:",
-      response.status,
-      errorText
-    );
-
-    throw new Error(
-      `MailerLite sync failed: ${response.status} ${errorText}`
-    );
-  }
-
-  const responseData = await response.json();
+  const responseText = await response.text();
 
   console.log(
-    "MailerLite sync success:",
-    data.email,
-    responseData?.data?.id ?? "ok"
+    "MailerLite response:",
+    response.status,
+    responseText
   );
 
-  return responseData;
+  return {
+    ok: response.ok,
+    status: response.status,
+    response: responseText,
+  };
 }
 
 export async function OPTIONS(req: NextRequest) {
@@ -163,11 +153,6 @@ export async function POST(req: NextRequest) {
       body.inferredCountry?.trim() ?? "";
     const source = body.source?.trim() ?? "tourvote";
 
-    console.log(
-      "Creating TourVote entry:",
-      email
-    );
-
     const savedVote = await prisma.tourVote.create({
       data: {
         name,
@@ -180,25 +165,43 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    console.log(
-      "TourVote DB save success:",
-      email
-    );
+    let mailerLiteResult = null;
 
     try {
-      await pushTourVoteToMailerLite({
-        name,
-        email,
-        selectedCity,
-        selectedCountry,
-        inferredCity,
-        inferredCountry,
-        source,
-      });
+      mailerLiteResult =
+        await pushTourVoteToMailerLite({
+          name,
+          email,
+          selectedCity,
+          selectedCountry,
+          inferredCity,
+          inferredCountry,
+          source,
+        });
     } catch (error) {
       console.error(
         "MailerLite push failed:",
         error
+      );
+
+      mailerLiteResult = {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown MailerLite error",
+      };
+    }
+
+    if (body.debugMailerLite) {
+      return jsonResponse(
+        {
+          ok: true,
+          id: savedVote.id,
+          mailerLite: mailerLiteResult,
+        },
+        200,
+        headers
       );
     }
 
