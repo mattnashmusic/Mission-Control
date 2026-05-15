@@ -46,78 +46,89 @@ function jsonResponse(
   });
 }
 
-function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
-
-async function pushTourVoteToMailerLite({
-  name,
-  email,
-  selectedCity,
-  selectedCountry,
-  inferredCity,
-  inferredCountry,
-  source,
-}: {
+async function pushTourVoteToMailerLite(data: {
   name: string;
   email: string;
-  selectedCity: string;
-  selectedCountry: string;
-  inferredCity: string;
-  inferredCountry: string;
-  source: string;
+  selectedCity?: string;
+  selectedCountry?: string;
+  inferredCity?: string;
+  inferredCountry?: string;
+  source?: string;
 }) {
   const apiKey = process.env.MAILERLITE_API_KEY;
-  const groupId = process.env.MAILERLITE_TOUR_VOTE_GROUP_ID;
+  const groupId =
+    process.env.MAILERLITE_TOUR_VOTE_GROUP_ID;
 
   if (!apiKey || !groupId) {
-    console.error("MailerLite env vars missing");
+    console.error(
+      "Missing MailerLite credentials or group ID"
+    );
     return;
   }
 
-  const response = await fetch("https://connect.mailerlite.com/api/subscribers", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      Authorization: `Bearer ${apiKey}`,
+  const payload = {
+    email: data.email,
+    fields: {
+      name: data.name,
+      tour_vote_city: data.selectedCity ?? "",
+      tour_vote_country: data.selectedCountry ?? "",
+      tour_vote_inferred_city: data.inferredCity ?? "",
+      tour_vote_inferred_country: data.inferredCountry ?? "",
+      tour_vote_source: data.source ?? "tourvote",
     },
-    body: JSON.stringify({
-      email,
-      fields: {
-        name,
-        tour_vote_city: selectedCity,
-        tour_vote_country: selectedCountry,
-        tour_vote_inferred_city: inferredCity,
-        tour_vote_inferred_country: inferredCountry,
-        tour_vote_source: source,
+    groups: [groupId],
+    status: "active",
+  };
+
+  console.log(
+    "Sending subscriber to MailerLite:",
+    data.email
+  );
+
+  const response = await fetch(
+    "https://connect.mailerlite.com/api/subscribers",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
       },
-      groups: [groupId],
-    }),
-  });
+      body: JSON.stringify(payload),
+    }
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error("MailerLite API error:", response.status, errorText);
+
+    console.error(
+      "MailerLite API error:",
+      response.status,
+      errorText
+    );
+
+    throw new Error(
+      `MailerLite sync failed: ${response.status} ${errorText}`
+    );
   }
+
+  const responseData = await response.json();
+
+  console.log(
+    "MailerLite sync success:",
+    data.email,
+    responseData?.data?.id ?? "ok"
+  );
+
+  return responseData;
 }
 
 export async function OPTIONS(req: NextRequest) {
   const origin = req.headers.get("origin");
-  const headers = buildCorsHeaders(origin);
 
   return new NextResponse(null, {
     status: 204,
-    headers,
+    headers: buildCorsHeaders(origin),
   });
 }
 
@@ -128,48 +139,37 @@ export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as TourVoteBody;
 
-    const name = body.name?.trim() || "";
-    const email = body.email?.trim() || "";
-    const selectedCity = body.selectedCity?.trim() || "";
-    const selectedCountry = body.selectedCountry?.trim() || "";
-    const inferredCity = body.inferredCity?.trim() || "";
-    const inferredCountry = body.inferredCountry?.trim() || "";
-    const source = body.source?.trim() || "tourvote";
-    const eventId = body.eventId?.trim() || "";
+    const name = body.name?.trim();
+    const email = body.email?.trim().toLowerCase();
 
-    if (!name || !email || !selectedCity || !selectedCountry || !eventId) {
+    if (!name || !email) {
       return jsonResponse(
-        { ok: false, error: "Missing required fields" },
+        {
+          ok: false,
+          error: "Missing name or email",
+        },
         400,
         headers
       );
     }
 
-    if (!isValidEmail(email)) {
-      return jsonResponse(
-        { ok: false, error: "Invalid email address" },
-        400,
-        headers
-      );
-    }
+    const selectedCity =
+      body.selectedCity?.trim() ?? "";
+    const selectedCountry =
+      body.selectedCountry?.trim() ?? "";
+    const inferredCity =
+      body.inferredCity?.trim() ?? "";
+    const inferredCountry =
+      body.inferredCountry?.trim() ?? "";
+    const source = body.source?.trim() ?? "tourvote";
 
-    try {
-      const savedVote = await prisma.tourVote.create({
-        data: {
-          name,
-          email,
-          selectedCity,
-          selectedCountry,
-          inferredCity: inferredCity || null,
-          inferredCountry: inferredCountry || null,
-          source,
-        },
-        select: {
-          id: true,
-        },
-      });
+    console.log(
+      "Creating TourVote entry:",
+      email
+    );
 
-      pushTourVoteToMailerLite({
+    const savedVote = await prisma.tourVote.create({
+      data: {
         name,
         email,
         selectedCity,
@@ -177,39 +177,46 @@ export async function POST(req: NextRequest) {
         inferredCity,
         inferredCountry,
         source,
-      }).catch((error) => {
-        console.error("MailerLite push failed:", error);
+      },
+    });
+
+    console.log(
+      "TourVote DB save success:",
+      email
+    );
+
+    try {
+      await pushTourVoteToMailerLite({
+        name,
+        email,
+        selectedCity,
+        selectedCountry,
+        inferredCity,
+        inferredCountry,
+        source,
       });
-
-      return jsonResponse(
-        {
-          ok: true,
-          id: savedVote.id,
-        },
-        200,
-        headers
-      );
     } catch (error) {
-      console.error("Tour vote DB error:", error);
-
-      return jsonResponse(
-        {
-          ok: false,
-          error: "DB write failed",
-          details: getErrorMessage(error),
-        },
-        500,
-        headers
+      console.error(
+        "MailerLite push failed:",
+        error
       );
     }
+
+    return jsonResponse(
+      {
+        ok: true,
+        id: savedVote.id,
+      },
+      200,
+      headers
+    );
   } catch (error) {
-    console.error("Tour vote route fatal error:", error);
+    console.error("TourVote API error:", error);
 
     return jsonResponse(
       {
         ok: false,
         error: "Internal server error",
-        details: getErrorMessage(error),
       },
       500,
       headers
