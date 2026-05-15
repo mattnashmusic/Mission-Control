@@ -2,12 +2,22 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { calculateClusterShares } from "@/lib/email/audience";
 
+type Source = "mailerlite" | "shopify";
+
 type RawRow = {
   email: string;
   country: string;
   city: string;
   zip: string;
-  source: "mailerlite" | "shopify" | "abandoned";
+  source: Source;
+};
+
+type MergedAudienceRow = {
+  email: string;
+  country: string;
+  city: string;
+  zip: string;
+  sources: Source[];
 };
 
 type GeocodedCluster = {
@@ -17,6 +27,8 @@ type GeocodedCluster = {
   lng: number;
   count: number;
   emails: string[];
+  mailerLiteEmails: string[];
+  shopifyOnlyEmails: string[];
 };
 
 type MailerLiteSubscriber = {
@@ -39,38 +51,6 @@ type ShopifyCustomerRow = {
   country: string | null;
   countryCode: string | null;
   rawJson: unknown;
-};
-
-type ShopifyAbandonedCheckout = {
-  id?: number | string;
-  email?: string | null;
-  abandoned_checkout_url?: string | null;
-  created_at?: string | null;
-  billing_address?: {
-    city?: string | null;
-    country?: string | null;
-    country_code?: string | null;
-    zip?: string | null;
-  } | null;
-  shipping_address?: {
-    city?: string | null;
-    country?: string | null;
-    country_code?: string | null;
-    zip?: string | null;
-  } | null;
-  customer?: {
-    email?: string | null;
-    default_address?: {
-      city?: string | null;
-      country?: string | null;
-      country_code?: string | null;
-      zip?: string | null;
-    } | null;
-  } | null;
-};
-
-type ShopifyAbandonedCheckoutResponse = {
-  checkouts?: ShopifyAbandonedCheckout[];
 };
 
 const geocodeCache = new Map<string, { lat: number; lng: number } | null>();
@@ -98,38 +78,59 @@ const COUNTRY_NAME_TO_CODE: Record<string, string> = {
 export async function GET() {
   try {
     const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+
     if (!mapboxToken) {
-      return new NextResponse("Missing NEXT_PUBLIC_MAPBOX_TOKEN in .env.local", {
+      return new NextResponse("Missing NEXT_PUBLIC_MAPBOX_TOKEN", {
         status: 500,
       });
     }
 
-    const [mailerLiteRows, shopifyRows, abandonedRows] = await Promise.all([
+    const [mailerLiteRows, shopifyRows] = await Promise.all([
       fetchMailerLiteActiveSubscribers(),
       fetchShopifyAudienceRows(),
-      fetchShopifyAbandonedCheckoutRows(),
     ]);
 
-    const merged = mergeAudienceRows(mailerLiteRows, shopifyRows, abandonedRows);
+    const merged = mergeAudienceRows(mailerLiteRows, shopifyRows);
 
     const grouped = new Map<
       string,
-      { city: string; country: string; count: number; emails: string[] }
+      {
+        city: string;
+        country: string;
+        count: number;
+        emails: string[];
+        mailerLiteEmails: string[];
+        shopifyOnlyEmails: string[];
+      }
     >();
 
     for (const row of merged.usableRows) {
       const key = `${row.city}__${row.country}`;
       const existing = grouped.get(key);
 
+      const isMailerLiteContact = row.sources.includes("mailerlite");
+      const isShopifyOnly =
+        row.sources.includes("shopify") && !row.sources.includes("mailerlite");
+
       if (existing) {
         existing.count += 1;
         existing.emails.push(row.email);
+
+        if (isMailerLiteContact) {
+          existing.mailerLiteEmails.push(row.email);
+        }
+
+        if (isShopifyOnly) {
+          existing.shopifyOnlyEmails.push(row.email);
+        }
       } else {
         grouped.set(key, {
           city: row.city,
           country: row.country,
           count: 1,
           emails: [row.email],
+          mailerLiteEmails: isMailerLiteContact ? [row.email] : [],
+          shopifyOnlyEmails: isShopifyOnly ? [row.email] : [],
         });
       }
     }
@@ -147,6 +148,8 @@ export async function GET() {
         lat: coords.lat,
         lng: coords.lng,
         emails: item.emails,
+        mailerLiteEmails: item.mailerLiteEmails,
+        shopifyOnlyEmails: item.shopifyOnlyEmails,
       };
     });
 
@@ -157,9 +160,16 @@ export async function GET() {
     return NextResponse.json({
       clusters,
       stats: {
-        totalRows: merged.totalSourceRows,
+        mailerLiteRows: mailerLiteRows.length,
+        shopifyRows: shopifyRows.length,
+        totalSourceRows: mailerLiteRows.length + shopifyRows.length,
+        uniqueContacts: merged.uniqueContacts,
         usableRows: merged.usableRows.length,
-        skippedRows: merged.totalSourceRows - merged.usableRows.length,
+        skippedRows: merged.uniqueContacts - merged.usableRows.length,
+        overlapContacts: merged.overlapContacts,
+        mailerLiteOnlyContacts: merged.mailerLiteOnlyContacts,
+        shopifyOnlyContacts: merged.shopifyOnlyContacts,
+        groupableContacts: merged.groupableContacts,
         uniqueCities: uniqueCities.length,
       },
     });
@@ -179,7 +189,7 @@ async function fetchMailerLiteActiveSubscribers(): Promise<RawRow[]> {
 
   if (!token) {
     throw new Error(
-      "Missing MAILERLITE_API_TOKEN (or MAILERLITE_TOKEN / MAILERLITE_API_KEY)"
+      "Missing MAILERLITE_API_TOKEN, MAILERLITE_TOKEN or MAILERLITE_API_KEY"
     );
   }
 
@@ -218,12 +228,20 @@ async function fetchMailerLiteActiveSubscribers(): Promise<RawRow[]> {
       if (!email) continue;
 
       const fields = subscriber.fields ?? {};
+
       const city = normalizeCity(
         readFirstString(fields.city, fields.City, fields.town, fields.Town)
       );
+
       const country = normalizeCountry(
-        readFirstString(fields.country, fields.Country, fields.location, fields.Location)
+        readFirstString(
+          fields.country,
+          fields.Country,
+          fields.location,
+          fields.Location
+        )
       );
+
       const zip = readFirstString(
         fields.z_i_p,
         fields.zip,
@@ -276,6 +294,7 @@ function mapShopifyCustomerToAudienceRow(
   const firstAddress = addresses.find(isObject) ?? null;
 
   const city = normalizeCity(readFirstString(defaultAddress?.city, firstAddress?.city));
+
   const country = normalizeCountry(
     readFirstString(
       customer.country,
@@ -288,6 +307,7 @@ function mapShopifyCustomerToAudienceRow(
       firstAddress?.country_code
     )
   );
+
   const zip = readFirstString(defaultAddress?.zip, firstAddress?.zip).trim();
 
   return {
@@ -299,146 +319,95 @@ function mapShopifyCustomerToAudienceRow(
   };
 }
 
-async function fetchShopifyAbandonedCheckoutRows(): Promise<RawRow[]> {
-  const storeDomain = process.env.SHOPIFY_STORE_DOMAIN;
-  const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
-
-  if (!storeDomain || !accessToken) {
-    throw new Error("Missing SHOPIFY_STORE_DOMAIN or SHOPIFY_ACCESS_TOKEN");
-  }
-
-  const rows: RawRow[] = [];
-  let pageInfoUrl: string | null = `https://${storeDomain}/admin/api/2026-01/checkouts.json?limit=250`;
-
-  while (pageInfoUrl) {
-    const response = await fetch(pageInfoUrl, {
-      method: "GET",
-      headers: {
-        "X-Shopify-Access-Token": accessToken,
-        "Content-Type": "application/json",
-      },
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Shopify abandoned checkouts fetch failed: ${response.status} ${text}`);
-    }
-
-    const json = (await response.json()) as ShopifyAbandonedCheckoutResponse;
-    const checkouts = json.checkouts ?? [];
-
-    for (const checkout of checkouts) {
-      const row = mapAbandonedCheckoutToAudienceRow(checkout);
-      if (row) rows.push(row);
-    }
-
-    pageInfoUrl = getNextLinkFromHeader(response.headers.get("link"));
-  }
-
-  return rows;
-}
-
-function mapAbandonedCheckoutToAudienceRow(
-  checkout: ShopifyAbandonedCheckout
-): RawRow | null {
-  const email = normalizeEmail(
-    checkout.email || checkout.customer?.email || ""
-  );
-  if (!email) return null;
-
-  const shipping = checkout.shipping_address ?? null;
-  const billing = checkout.billing_address ?? null;
-  const customerDefault = checkout.customer?.default_address ?? null;
-
-  const city = normalizeCity(
-    readFirstString(shipping?.city, billing?.city, customerDefault?.city)
-  );
-
-  const country = normalizeCountry(
-    readFirstString(
-      shipping?.country,
-      shipping?.country_code,
-      billing?.country,
-      billing?.country_code,
-      customerDefault?.country,
-      customerDefault?.country_code
-    )
-  );
-
-  const zip = readFirstString(
-    shipping?.zip,
-    billing?.zip,
-    customerDefault?.zip
-  ).trim();
-
-  return {
-    email,
-    city,
-    country,
-    zip,
-    source: "abandoned",
-  };
-}
-
 function mergeAudienceRows(
   mailerLiteRows: RawRow[],
-  shopifyRows: RawRow[],
-  abandonedRows: RawRow[]
+  shopifyRows: RawRow[]
 ): {
-  totalSourceRows: number;
-  usableRows: RawRow[];
+  uniqueContacts: number;
+  usableRows: MergedAudienceRow[];
+  overlapContacts: number;
+  mailerLiteOnlyContacts: number;
+  shopifyOnlyContacts: number;
+  groupableContacts: number;
 } {
-  const merged = new Map<string, RawRow>();
+  const merged = new Map<string, MergedAudienceRow>();
 
-  for (const row of [...abandonedRows, ...shopifyRows, ...mailerLiteRows]) {
-    const key = normalizeEmail(row.email);
-    if (!key) continue;
+  for (const row of [...mailerLiteRows, ...shopifyRows]) {
+    const email = normalizeEmail(row.email);
+    if (!email) continue;
 
-    const existing = merged.get(key);
+    const existing = merged.get(email);
 
     if (!existing) {
-      merged.set(key, { ...row, email: key });
+      merged.set(email, {
+        email,
+        city: row.city,
+        country: row.country,
+        zip: row.zip,
+        sources: [row.source],
+      });
       continue;
     }
 
-    const next: RawRow = {
-      email: key,
-      source:
-        existing.source === "mailerlite" || row.source === "mailerlite"
-          ? "mailerlite"
-          : existing.source === "shopify" || row.source === "shopify"
-          ? "shopify"
-          : "abandoned",
-      city: existing.city,
-      country: existing.country,
-      zip: existing.zip || row.zip,
-    };
+    const sources = Array.from(new Set([...existing.sources, row.source]));
 
-    if (!next.city && row.city) next.city = row.city;
-    if (!next.country && row.country) next.country = row.country;
+    let city = existing.city;
+    let country = existing.country;
+    let zip = existing.zip || row.zip;
 
-    if (
-      row.source === "mailerlite" &&
-      row.city &&
-      row.country &&
-      (!existing.city || !existing.country)
-    ) {
-      next.city = row.city;
-      next.country = row.country;
-      next.zip = row.zip || next.zip;
+    const existingHasLocation = !!existing.city && !!existing.country;
+    const rowHasLocation = !!row.city && !!row.country;
+
+    if (!existingHasLocation && rowHasLocation) {
+      city = row.city;
+      country = row.country;
+      zip = row.zip || zip;
     }
 
-    merged.set(key, next);
+    if (row.source === "shopify" && rowHasLocation) {
+      city = row.city;
+      country = row.country;
+      zip = row.zip || zip;
+    }
+
+    merged.set(email, {
+      email,
+      city,
+      country,
+      zip,
+      sources,
+    });
   }
 
-  const usableRows = Array.from(merged.values()).filter(
+  const allRows = Array.from(merged.values());
+
+  const usableRows = allRows.filter(
     (row) => !!row.email && !!row.city && !!row.country
   );
 
+  const overlapContacts = allRows.filter(
+    (row) => row.sources.includes("mailerlite") && row.sources.includes("shopify")
+  ).length;
+
+  const mailerLiteOnlyContacts = allRows.filter(
+    (row) => row.sources.includes("mailerlite") && !row.sources.includes("shopify")
+  ).length;
+
+  const shopifyOnlyContacts = allRows.filter(
+    (row) => row.sources.includes("shopify") && !row.sources.includes("mailerlite")
+  ).length;
+
+  const groupableContacts = allRows.filter((row) =>
+    row.sources.includes("mailerlite")
+  ).length;
+
   return {
-    totalSourceRows: mailerLiteRows.length + shopifyRows.length + abandonedRows.length,
+    uniqueContacts: allRows.length,
     usableRows,
+    overlapContacts,
+    mailerLiteOnlyContacts,
+    shopifyOnlyContacts,
+    groupableContacts,
   };
 }
 
@@ -480,6 +449,7 @@ function readFirstString(...values: unknown[]) {
       return value;
     }
   }
+
   return "";
 }
 
@@ -487,21 +457,9 @@ function isObject(value: unknown): value is Record<string, any> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function getNextLinkFromHeader(linkHeader: string | null): string | null {
-  if (!linkHeader) return null;
-
-  const parts = linkHeader.split(",");
-  for (const part of parts) {
-    const match = part.match(/<([^>]+)>;\s*rel="next"/);
-    if (match?.[1]) {
-      return match[1];
-    }
-  }
-  return null;
-}
-
 async function geocodeCity(city: string, country: string, token: string) {
   const cacheKey = `${city}__${country}`;
+
   if (geocodeCache.has(cacheKey)) {
     return geocodeCache.get(cacheKey) ?? null;
   }
