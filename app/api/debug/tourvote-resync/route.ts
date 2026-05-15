@@ -13,13 +13,10 @@ async function pushToMailerLite(data: {
   source?: string;
 }) {
   const apiKey = process.env.MAILERLITE_API_KEY;
-  const groupId =
-    process.env.MAILERLITE_TOUR_VOTE_GROUP_ID;
+  const groupId = process.env.MAILERLITE_TOUR_VOTE_GROUP_ID;
 
   if (!apiKey || !groupId) {
-    throw new Error(
-      "Missing MailerLite credentials or group ID"
-    );
+    throw new Error("Missing MailerLite credentials or group ID");
   }
 
   const payload = {
@@ -29,8 +26,7 @@ async function pushToMailerLite(data: {
       tour_vote_city: data.selectedCity ?? "",
       tour_vote_country: data.selectedCountry ?? "",
       tour_vote_inferred_city: data.inferredCity ?? "",
-      tour_vote_inferred_country:
-        data.inferredCountry ?? "",
+      tour_vote_inferred_country: data.inferredCountry ?? "",
       tour_vote_source: data.source ?? "tourvote",
     },
     groups: [groupId],
@@ -61,15 +57,14 @@ async function pushToMailerLite(data: {
 
 export async function GET(req: NextRequest) {
   try {
-    const limit =
-      Number(
-        req.nextUrl.searchParams.get("limit")
-      ) || 25;
+    const limit = Number(req.nextUrl.searchParams.get("limit")) || 25;
+    const skip = Number(req.nextUrl.searchParams.get("skip")) || 0;
 
     const rows = await prisma.tourVote.findMany({
       orderBy: {
         createdAt: "asc",
       },
+      skip,
       take: limit,
     });
 
@@ -81,11 +76,9 @@ export async function GET(req: NextRequest) {
           name: row.name,
           email: row.email,
           selectedCity: row.selectedCity ?? "",
-          selectedCountry:
-            row.selectedCountry ?? "",
+          selectedCountry: row.selectedCountry ?? "",
           inferredCity: row.inferredCity ?? "",
-          inferredCountry:
-            row.inferredCountry ?? "",
+          inferredCountry: row.inferredCountry ?? "",
           source: row.source ?? "tourvote",
         });
 
@@ -95,9 +88,7 @@ export async function GET(req: NextRequest) {
           status: result.status,
         });
 
-        await new Promise((resolve) =>
-          setTimeout(resolve, 300)
-        );
+        await new Promise((resolve) => setTimeout(resolve, 300));
       } catch (error) {
         results.push({
           email: row.email,
@@ -112,6 +103,8 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      skip,
+      limit,
       processed: results.length,
       results,
     });
@@ -119,9 +112,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ok: false,
       error:
-        error instanceof Error
-          ? error.message
-          : "Unknown error",
+        error instanceof Error ? error.message : "Unknown error",
     });
   }
 }
