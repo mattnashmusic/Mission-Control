@@ -24,12 +24,24 @@ const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
 };
 
 type AudienceApiResponse = {
-  clusters: (CityCluster & { emails?: string[] })[];
-  stats: {
-    totalRows: number;
-    usableRows: number;
-    skippedRows: number;
-    uniqueCities: number;
+  clusters?: (CityCluster & {
+    emails?: string[];
+    mailerLiteEmails?: string[];
+    shopifyOnlyEmails?: string[];
+  })[];
+  stats?: {
+    totalRows?: number;
+    totalSourceRows?: number;
+    mailerLiteRows?: number;
+    shopifyRows?: number;
+    uniqueContacts?: number;
+    usableRows?: number;
+    skippedRows?: number;
+    overlapContacts?: number;
+    mailerLiteOnlyContacts?: number;
+    shopifyOnlyContacts?: number;
+    groupableContacts?: number;
+    uniqueCities?: number;
   };
 };
 
@@ -89,6 +101,8 @@ export default function EmailPage() {
   }, []);
 
   const cityClusters = data?.clusters ?? [];
+  const stats = data?.stats ?? {};
+  const totalSourceRows = stats.totalRows ?? stats.totalSourceRows ?? 0;
   const summary = useMemo(() => getAudienceSummaryFromClusters(cityClusters), [cityClusters]);
   const center = CITY_COORDS[selectedCity];
 
@@ -385,10 +399,10 @@ export default function EmailPage() {
 
       {data && (
         <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-          <SmallStat label="CSV Rows" value={data.stats.totalRows.toLocaleString()} />
-          <SmallStat label="Mapped Rows" value={data.stats.usableRows.toLocaleString()} />
-          <SmallStat label="Skipped Rows" value={data.stats.skippedRows.toLocaleString()} />
-          <SmallStat label="Unique Cities" value={data.stats.uniqueCities.toLocaleString()} />
+          <SmallStat label="Source Rows" value={totalSourceRows.toLocaleString()} />
+          <SmallStat label="Unique Contacts" value={(stats.uniqueContacts ?? summary.totalContacts).toLocaleString()} />
+          <SmallStat label="Mapped Contacts" value={(stats.usableRows ?? summary.totalContacts).toLocaleString()} />
+          <SmallStat label="Unique Cities" value={(stats.uniqueCities ?? summary.totalCities).toLocaleString()} />
         </section>
       )}
 
