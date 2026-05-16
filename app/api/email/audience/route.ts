@@ -7,7 +7,7 @@ type RawRow = {
   country: string;
   city: string;
   zip: string;
-  source: "mailerlite" | "shopify" | "abandoned";
+  source: "mailerlite" | "shopify";
 };
 
 type GeocodedCluster = {
@@ -44,38 +44,6 @@ type ShopifyCustomerRow = {
   rawJson: unknown;
 };
 
-type ShopifyAbandonedCheckout = {
-  id?: number | string;
-  email?: string | null;
-  abandoned_checkout_url?: string | null;
-  created_at?: string | null;
-  billing_address?: {
-    city?: string | null;
-    country?: string | null;
-    country_code?: string | null;
-    zip?: string | null;
-  } | null;
-  shipping_address?: {
-    city?: string | null;
-    country?: string | null;
-    country_code?: string | null;
-    zip?: string | null;
-  } | null;
-  customer?: {
-    email?: string | null;
-    default_address?: {
-      city?: string | null;
-      country?: string | null;
-      country_code?: string | null;
-      zip?: string | null;
-    } | null;
-  } | null;
-};
-
-type ShopifyAbandonedCheckoutResponse = {
-  checkouts?: ShopifyAbandonedCheckout[];
-};
-
 const geocodeCache = new Map<string, { lat: number; lng: number } | null>();
 
 const COUNTRY_NAME_TO_CODE: Record<string, string> = {
@@ -107,13 +75,12 @@ export async function GET() {
       });
     }
 
-    const [mailerLiteRows, shopifyRows, abandonedRows] = await Promise.all([
+    const [mailerLiteRows, shopifyRows] = await Promise.all([
       fetchMailerLiteActiveSubscribers(),
       fetchShopifyAudienceRows(),
-      fetchShopifyAbandonedCheckoutRows(),
     ]);
 
-    const merged = mergeAudienceRows(mailerLiteRows, shopifyRows, abandonedRows);
+    const merged = mergeAudienceRows(mailerLiteRows, shopifyRows);
 
     const grouped = new Map<
       string,
@@ -337,99 +304,18 @@ function mapShopifyCustomerToAudienceRow(
   };
 }
 
-async function fetchShopifyAbandonedCheckoutRows(): Promise<RawRow[]> {
-  const storeDomain = process.env.SHOPIFY_STORE_DOMAIN;
-  const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
-
-  if (!storeDomain || !accessToken) {
-    throw new Error("Missing SHOPIFY_STORE_DOMAIN or SHOPIFY_ACCESS_TOKEN");
-  }
-
-  const rows: RawRow[] = [];
-  let pageInfoUrl: string | null = `https://${storeDomain}/admin/api/2026-01/checkouts.json?limit=250`;
-
-  while (pageInfoUrl) {
-    const response = await fetch(pageInfoUrl, {
-      method: "GET",
-      headers: {
-        "X-Shopify-Access-Token": accessToken,
-        "Content-Type": "application/json",
-      },
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Shopify abandoned checkouts fetch failed: ${response.status} ${text}`);
-    }
-
-    const json = (await response.json()) as ShopifyAbandonedCheckoutResponse;
-    const checkouts = json.checkouts ?? [];
-
-    for (const checkout of checkouts) {
-      const row = mapAbandonedCheckoutToAudienceRow(checkout);
-      if (row) rows.push(row);
-    }
-
-    pageInfoUrl = getNextLinkFromHeader(response.headers.get("link"));
-  }
-
-  return rows;
-}
-
-function mapAbandonedCheckoutToAudienceRow(
-  checkout: ShopifyAbandonedCheckout
-): RawRow | null {
-  const email = normalizeEmail(
-    checkout.email || checkout.customer?.email || ""
-  );
-  if (!email) return null;
-
-  const shipping = checkout.shipping_address ?? null;
-  const billing = checkout.billing_address ?? null;
-  const customerDefault = checkout.customer?.default_address ?? null;
-
-  const city = normalizeCity(
-    readFirstString(shipping?.city, billing?.city, customerDefault?.city)
-  );
-
-  const country = normalizeCountry(
-    readFirstString(
-      shipping?.country,
-      shipping?.country_code,
-      billing?.country,
-      billing?.country_code,
-      customerDefault?.country,
-      customerDefault?.country_code
-    )
-  );
-
-  const zip = readFirstString(
-    shipping?.zip,
-    billing?.zip,
-    customerDefault?.zip
-  ).trim();
-
-  return {
-    email,
-    city,
-    country,
-    zip,
-    source: "abandoned",
-  };
-}
-
 function mergeAudienceRows(
   mailerLiteRows: RawRow[],
-  shopifyRows: RawRow[],
-  abandonedRows: RawRow[]
+  shopifyRows: RawRow[]
 ): {
   totalSourceRows: number;
   usableRows: RawRow[];
 } {
   const merged = new Map<string, RawRow>();
 
-  for (const row of [...abandonedRows, ...shopifyRows, ...mailerLiteRows]) {
+  // Shopify goes first so it can supply address data, then MailerLite can
+  // add/override with tour vote and group-derived location data where better.
+  for (const row of [...shopifyRows, ...mailerLiteRows]) {
     const key = normalizeEmail(row.email);
     if (!key) continue;
 
@@ -440,28 +326,29 @@ function mergeAudienceRows(
       continue;
     }
 
+    const existingHasLocation = !!existing.city && !!existing.country;
+    const rowHasLocation = !!row.city && !!row.country;
+
     const next: RawRow = {
       email: key,
       source:
         existing.source === "mailerlite" || row.source === "mailerlite"
           ? "mailerlite"
-          : existing.source === "shopify" || row.source === "shopify"
-          ? "shopify"
-          : "abandoned",
+          : "shopify",
       city: existing.city,
       country: existing.country,
       zip: existing.zip || row.zip,
     };
 
-    if (!next.city && row.city) next.city = row.city;
-    if (!next.country && row.country) next.country = row.country;
+    if (!existingHasLocation && rowHasLocation) {
+      next.city = row.city;
+      next.country = row.country;
+      next.zip = row.zip || next.zip;
+    }
 
-    if (
-      row.source === "mailerlite" &&
-      row.city &&
-      row.country &&
-      (!existing.city || !existing.country)
-    ) {
+    // Prefer MailerLite when it has explicit/tour/group location, because
+    // that is often more relevant for live/tour grouping than billing address.
+    if (row.source === "mailerlite" && rowHasLocation) {
       next.city = row.city;
       next.country = row.country;
       next.zip = row.zip || next.zip;
@@ -475,7 +362,7 @@ function mergeAudienceRows(
   );
 
   return {
-    totalSourceRows: mailerLiteRows.length + shopifyRows.length + abandonedRows.length,
+    totalSourceRows: mailerLiteRows.length + shopifyRows.length,
     usableRows,
   };
 }
