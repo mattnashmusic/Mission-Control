@@ -122,17 +122,29 @@ export default async function TourVotePage() {
       if (campaign.metaCampaignId) {
         try {
           const meta = await getTourMetaSnapshot(campaign.metaCampaignId);
-          adSpendToday = typeof meta?.spend?.today === "number" ? meta.spend.today : 0;
+
+          adSpendToday =
+            typeof meta?.spend?.today === "number" ? meta.spend.today : 0;
+
           adSpendTotal =
-            typeof meta?.spend?.lifetime === "number" ? meta.spend.lifetime : 0;
+            typeof meta?.spend?.lifetime === "number"
+              ? meta.spend.lifetime
+              : 0;
         } catch {
           adSpendToday = 0;
           adSpendTotal = 0;
         }
       }
 
-      const costPerSignup =
-        signupsTotal > 0 && adSpendTotal > 0 ? adSpendTotal / signupsTotal : 0;
+      const costPerSignupToday =
+        signupsToday > 0 && adSpendToday > 0
+          ? adSpendToday / signupsToday
+          : 0;
+
+      const costPerSignupTotal =
+        signupsTotal > 0 && adSpendTotal > 0
+          ? adSpendTotal / signupsTotal
+          : 0;
 
       return {
         ...campaign,
@@ -140,7 +152,8 @@ export default async function TourVotePage() {
         signupsTotal,
         adSpendToday,
         adSpendTotal,
-        costPerSignup,
+        costPerSignupToday,
+        costPerSignupTotal,
       };
     })
   );
@@ -150,16 +163,27 @@ export default async function TourVotePage() {
     0
   );
 
-  const totalSignups = campaignRows.reduce((sum, row) => sum + row.signupsTotal, 0);
+  const totalSignups = campaignRows.reduce(
+    (sum, row) => sum + row.signupsTotal,
+    0
+  );
 
   const totalAdSpendToday = campaignRows.reduce(
     (sum, row) => sum + row.adSpendToday,
     0
   );
 
-  const totalAdSpend = campaignRows.reduce((sum, row) => sum + row.adSpendTotal, 0);
+  const totalAdSpend = campaignRows.reduce(
+    (sum, row) => sum + row.adSpendTotal,
+    0
+  );
 
-  const blendedCostPerSignup =
+  const blendedCostPerSignupToday =
+    totalSignupsToday > 0 && totalAdSpendToday > 0
+      ? totalAdSpendToday / totalSignupsToday
+      : 0;
+
+  const blendedCostPerSignupTotal =
     totalSignups > 0 && totalAdSpend > 0 ? totalAdSpend / totalSignups : 0;
 
   return (
@@ -181,7 +205,7 @@ export default async function TourVotePage() {
           </div>
         </div>
 
-        <section className="mb-8 grid gap-4 md:grid-cols-4">
+        <section className="mb-8 grid gap-4 md:grid-cols-5">
           <KpiCard
             title="Signups Today"
             value={number(totalSignupsToday)}
@@ -201,8 +225,28 @@ export default async function TourVotePage() {
           />
 
           <KpiCard
-            title="Blended Cost Per Signup"
-            value={blendedCostPerSignup > 0 ? money(blendedCostPerSignup) : "—"}
+            title="CPS Today"
+            value={
+              blendedCostPerSignupToday > 0
+                ? money(blendedCostPerSignupToday)
+                : "—"
+            }
+            subtitle={
+              totalSignupsToday > 0
+                ? `${money(totalAdSpendToday)} / ${number(
+                    totalSignupsToday
+                  )} signups today`
+                : "Waiting for today's first signup"
+            }
+          />
+
+          <KpiCard
+            title="CPS Total"
+            value={
+              blendedCostPerSignupTotal > 0
+                ? money(blendedCostPerSignupTotal)
+                : "—"
+            }
             subtitle={
               totalSignups > 0
                 ? `${money(totalAdSpend)} / ${number(totalSignups)} signups`
@@ -215,25 +259,24 @@ export default async function TourVotePage() {
           <div className="border-b border-white/10 px-5 py-4">
             <h2 className="text-xl font-semibold">Campaign performance</h2>
             <p className="mt-1 text-sm text-zinc-400">
-              One row per city campaign. Add or edit rows in{" "}
-              <code className="rounded bg-white/10 px-1 py-0.5">
-                lib/tour-campaigns.ts
-              </code>
-              .
+              One row per city campaign. The Meta Campaign ID column is shown for
+              debugging so we can confirm each row is pulling the correct campaign.
             </p>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-left text-sm">
+            <table className="w-full min-w-[1150px] text-left text-sm">
               <thead className="border-b border-white/10 text-xs uppercase tracking-wide text-zinc-500">
                 <tr>
                   <th className="px-5 py-3">City</th>
                   <th className="px-5 py-3">Source</th>
+                  <th className="px-5 py-3">Meta Campaign ID</th>
                   <th className="px-5 py-3 text-right">Signups Today</th>
                   <th className="px-5 py-3 text-right">Signups Total</th>
                   <th className="px-5 py-3 text-right">Ad Spend Today</th>
                   <th className="px-5 py-3 text-right">Ad Spend Total</th>
-                  <th className="px-5 py-3 text-right">Cost Per Signup</th>
+                  <th className="px-5 py-3 text-right">CPS Today</th>
+                  <th className="px-5 py-3 text-right">CPS Total</th>
                 </tr>
               </thead>
 
@@ -249,6 +292,16 @@ export default async function TourVotePage() {
                       <code className="rounded bg-white/10 px-2 py-1 text-xs">
                         {row.source}
                       </code>
+                    </td>
+
+                    <td className="px-5 py-4 text-zinc-400">
+                      {row.metaCampaignId ? (
+                        <code className="rounded bg-white/10 px-2 py-1 text-xs">
+                          {row.metaCampaignId}
+                        </code>
+                      ) : (
+                        "—"
+                      )}
                     </td>
 
                     <td className="px-5 py-4 text-right text-zinc-200">
@@ -268,7 +321,15 @@ export default async function TourVotePage() {
                     </td>
 
                     <td className="px-5 py-4 text-right font-medium text-white">
-                      {row.costPerSignup > 0 ? money(row.costPerSignup) : "—"}
+                      {row.costPerSignupToday > 0
+                        ? money(row.costPerSignupToday)
+                        : "—"}
+                    </td>
+
+                    <td className="px-5 py-4 text-right font-medium text-white">
+                      {row.costPerSignupTotal > 0
+                        ? money(row.costPerSignupTotal)
+                        : "—"}
                     </td>
                   </tr>
                 ))}

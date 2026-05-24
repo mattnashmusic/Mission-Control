@@ -8,11 +8,18 @@ export type TourCampaignConfig = {
 
 export const TOUR_CAMPAIGNS: TourCampaignConfig[] = [
   {
+    city: "Tour Vote",
+    country: "Multi-country",
+    source: "tourvote",
+    matchSources: ["tourvote", "tour_vote", "Tour Vote"],
+    metaCampaignId: "120243220166110724",
+  },
+  {
     city: "Hamburg",
     country: "Germany",
     source: "hamburg_signup",
     matchSources: ["hamburg_signup", "hamburg", "Matt Nash Live in Hamburg"],
-    metaCampaignId: "120243220166110724",
+    metaCampaignId: "120244349071170724",
   },
   {
     city: "Amsterdam",
