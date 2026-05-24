@@ -12,7 +12,7 @@ export const TOUR_CAMPAIGNS: TourCampaignConfig[] = [
     country: "Germany",
     source: "hamburg_lp",
     matchSources: ["hamburg_lp"],
-    metaCampaignId: "120243220166110724",
+    metaCampaignId: "120244349071170724",
   },
   {
     city: "Tour Vote",
