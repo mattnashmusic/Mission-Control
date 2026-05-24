@@ -113,7 +113,18 @@ export default async function TourVotePage() {
       let adSpendToday = 0;
       let adSpendTotal = 0;
 
-      if (campaign.metaCampaignId) {
+      if (typeof campaign.manualAdSpendToday === "number") {
+        adSpendToday = campaign.manualAdSpendToday;
+      }
+
+      if (typeof campaign.manualAdSpendTotal === "number") {
+        adSpendTotal = campaign.manualAdSpendTotal;
+      }
+
+      if (
+        campaign.metaCampaignId &&
+        typeof campaign.manualAdSpendTotal !== "number"
+      ) {
         try {
           const meta = await getTourMetaSnapshot(campaign.metaCampaignId);
 
@@ -253,7 +264,8 @@ export default async function TourVotePage() {
           <div className="border-b border-white/10 px-5 py-4">
             <h2 className="text-xl font-semibold">Campaign performance</h2>
             <p className="mt-1 text-sm text-zinc-400">
-              Campaign rows now match signups by source only.
+              Campaign rows match signups by source only. Manual spend overrides
+              can be set in <code className="rounded bg-white/10 px-1 py-0.5">lib/tour-campaigns.ts</code>.
             </p>
           </div>
 
@@ -292,6 +304,10 @@ export default async function TourVotePage() {
                         <code className="rounded bg-white/10 px-2 py-1 text-xs">
                           {row.metaCampaignId}
                         </code>
+                      ) : row.manualAdSpendTotal ? (
+                        <span className="text-xs text-zinc-500">
+                          Manual spend override
+                        </span>
                       ) : (
                         "—"
                       )}
@@ -306,11 +322,15 @@ export default async function TourVotePage() {
                     </td>
 
                     <td className="px-5 py-4 text-right text-zinc-200">
-                      {row.metaCampaignId ? money(row.adSpendToday) : "—"}
+                      {row.metaCampaignId || row.manualAdSpendToday
+                        ? money(row.adSpendToday)
+                        : "—"}
                     </td>
 
                     <td className="px-5 py-4 text-right text-zinc-200">
-                      {row.metaCampaignId ? money(row.adSpendTotal) : "—"}
+                      {row.metaCampaignId || row.manualAdSpendTotal
+                        ? money(row.adSpendTotal)
+                        : "—"}
                     </td>
 
                     <td className="px-5 py-4 text-right font-medium text-white">

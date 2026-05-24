@@ -4,6 +4,8 @@ export type TourCampaignConfig = {
   source: string;
   matchSources: string[];
   metaCampaignId: string;
+  manualAdSpendTotal?: number;
+  manualAdSpendToday?: number;
 };
 
 export const TOUR_CAMPAIGNS: TourCampaignConfig[] = [
@@ -20,6 +22,7 @@ export const TOUR_CAMPAIGNS: TourCampaignConfig[] = [
     source: "tourvote",
     matchSources: ["tourvote", "tour_vote"],
     metaCampaignId: "",
+    manualAdSpendTotal: 370.16,
   },
   {
     city: "Amsterdam",
