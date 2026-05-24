@@ -61,18 +61,10 @@ function voteMatchesCampaign(
   campaign: (typeof TOUR_CAMPAIGNS)[number]
 ) {
   const source = normalise(vote.source);
-  const selectedCity = normalise(vote.selectedCity);
-  const inferredCity = normalise(vote.inferredCity);
 
-  const sourceMatches = campaign.matchSources.some(
+  return campaign.matchSources.some(
     (matchSource) => normalise(matchSource) === source
   );
-
-  const cityMatches =
-    selectedCity === normalise(campaign.city) ||
-    inferredCity === normalise(campaign.city);
-
-  return sourceMatches || cityMatches;
 }
 
 function KpiCard({
@@ -88,7 +80,9 @@ function KpiCard({
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
       <div className="text-sm text-zinc-400">{title}</div>
       <div className="mt-2 text-3xl font-semibold text-white">{value}</div>
-      {subtitle ? <div className="mt-2 text-sm text-zinc-500">{subtitle}</div> : null}
+      {subtitle ? (
+        <div className="mt-2 text-sm text-zinc-500">{subtitle}</div>
+      ) : null}
     </div>
   );
 }
@@ -259,8 +253,7 @@ export default async function TourVotePage() {
           <div className="border-b border-white/10 px-5 py-4">
             <h2 className="text-xl font-semibold">Campaign performance</h2>
             <p className="mt-1 text-sm text-zinc-400">
-              One row per city campaign. The Meta Campaign ID column is shown for
-              debugging so we can confirm each row is pulling the correct campaign.
+              Campaign rows now match signups by source only.
             </p>
           </div>
 
@@ -282,7 +275,7 @@ export default async function TourVotePage() {
 
               <tbody>
                 {campaignRows.map((row) => (
-                  <tr key={row.city} className="border-b border-white/5">
+                  <tr key={row.source} className="border-b border-white/5">
                     <td className="px-5 py-4">
                       <div className="font-medium text-white">{row.city}</div>
                       <div className="text-xs text-zinc-500">{row.country}</div>
