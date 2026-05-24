@@ -1,9 +1,7 @@
 import Link from "next/link";
-import SyncButton from "@/components/SyncButton";
 import { prisma } from "@/lib/prisma";
 import { getTourMetaSnapshot } from "@/lib/meta-tour";
-
-const TOUR_VOTE_CAMPAIGN_ID = "120243220166110724";
+import { TOUR_CAMPAIGNS } from "@/lib/tour-campaigns";
 
 const TIME_ZONE = "Europe/Amsterdam";
 
@@ -15,15 +13,8 @@ type TourVoteRow = {
   selectedCountry: string;
   inferredCity: string | null;
   inferredCountry: string | null;
+  source: string | null;
   createdAt: Date;
-};
-
-type ShopifyOrderForFshCheck = {
-  email: string | null;
-  lineItems: {
-    title: string;
-    sku: string | null;
-  }[];
 };
 
 function money(value: number) {
@@ -31,6 +22,10 @@ function money(value: number) {
     style: "currency",
     currency: "EUR",
   }).format(value);
+}
+
+function number(value: number) {
+  return new Intl.NumberFormat("en-GB").format(value);
 }
 
 function getDateKey(dateLike: string | Date) {
@@ -53,132 +48,31 @@ function formatDateTime(dateLike: string | Date) {
   }).format(new Date(dateLike));
 }
 
-function buildRecentDateKeySet(days: number) {
-  const keys = new Set<string>();
-  const now = new Date();
-
-  for (let i = 0; i < days; i += 1) {
-    const date = new Date(now);
-    date.setDate(date.getDate() - i);
-    keys.add(getDateKey(date));
-  }
-
-  return keys;
+function normalise(value: string | null | undefined) {
+  return value?.trim().toLowerCase() || "";
 }
 
-function filterVotesByDateKeys(votes: TourVoteRow[], dateKeys: Set<string>) {
-  return votes.filter((vote) => dateKeys.has(getDateKey(vote.createdAt)));
+function isToday(dateLike: string | Date) {
+  return getDateKey(dateLike) === getDateKey(new Date());
 }
 
-function normalizeEmail(email: string | null | undefined) {
-  return email?.trim().toLowerCase() || "";
-}
+function voteMatchesCampaign(
+  vote: TourVoteRow,
+  campaign: (typeof TOUR_CAMPAIGNS)[number]
+) {
+  const source = normalise(vote.source);
+  const selectedCity = normalise(vote.selectedCity);
+  const inferredCity = normalise(vote.inferredCity);
 
-function isFshProduct(title: string, sku: string | null) {
-  const haystack = `${title} ${sku || ""}`.toLowerCase();
-
-  return (
-    haystack.includes("rebirth") ||
-    haystack.includes("deluxe") ||
-    haystack.includes("vinyl")
+  const sourceMatches = campaign.matchSources.some(
+    (matchSource) => normalise(matchSource) === source
   );
-}
 
-function buildFshEmailSet(orders: ShopifyOrderForFshCheck[]) {
-  const fshEmailSet = new Set<string>();
+  const cityMatches =
+    selectedCity === normalise(campaign.city) ||
+    inferredCity === normalise(campaign.city);
 
-  for (const order of orders) {
-    const email = normalizeEmail(order.email);
-    if (!email) continue;
-
-    const hasFshProduct = order.lineItems.some((item) =>
-      isFshProduct(item.title, item.sku)
-    );
-
-    if (hasFshProduct) {
-      fshEmailSet.add(email);
-    }
-  }
-
-  return fshEmailSet;
-}
-
-function getAudienceQuality(votes: TourVoteRow[], fshEmailSet: Set<string>) {
-  const tourVoteEmailSet = new Set<string>();
-
-  for (const vote of votes) {
-    const email = normalizeEmail(vote.email);
-    if (email) {
-      tourVoteEmailSet.add(email);
-    }
-  }
-
-  const totalUniqueTourVoteEmails = tourVoteEmailSet.size;
-  let fshOverlap = 0;
-
-  for (const email of tourVoteEmailSet) {
-    if (fshEmailSet.has(email)) {
-      fshOverlap += 1;
-    }
-  }
-
-  const nonFsh = totalUniqueTourVoteEmails - fshOverlap;
-  const nonFshPercent =
-    totalUniqueTourVoteEmails > 0
-      ? (nonFsh / totalUniqueTourVoteEmails) * 100
-      : 0;
-  const fshPercent =
-    totalUniqueTourVoteEmails > 0
-      ? (fshOverlap / totalUniqueTourVoteEmails) * 100
-      : 0;
-
-  return {
-    totalUniqueTourVoteEmails,
-    fshOverlap,
-    nonFsh,
-    nonFshPercent,
-    fshPercent,
-  };
-}
-
-function getTopCity(votes: TourVoteRow[]) {
-  if (votes.length === 0) {
-    return { city: "—", count: 0 };
-  }
-
-  const counts = new Map<string, number>();
-
-  for (const vote of votes) {
-    counts.set(vote.selectedCity, (counts.get(vote.selectedCity) || 0) + 1);
-  }
-
-  const [city, count] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
-
-  return { city, count };
-}
-
-function getCityLeaderboard(votes: TourVoteRow[]) {
-  const counts = new Map<string, number>();
-
-  for (const vote of votes) {
-    counts.set(vote.selectedCity, (counts.get(vote.selectedCity) || 0) + 1);
-  }
-
-  return [...counts.entries()]
-    .map(([city, count]) => ({ city, count }))
-    .sort((a, b) => b.count - a.count);
-}
-
-function getCountryLeaderboard(votes: TourVoteRow[]) {
-  const counts = new Map<string, number>();
-
-  for (const vote of votes) {
-    counts.set(vote.selectedCountry, (counts.get(vote.selectedCountry) || 0) + 1);
-  }
-
-  return [...counts.entries()]
-    .map(([country, count]) => ({ country, count }))
-    .sort((a, b) => b.count - a.count);
+  return sourceMatches || cityMatches;
 }
 
 function KpiCard({
@@ -191,25 +85,16 @@ function KpiCard({
   subtitle?: string;
 }) {
   return (
-    <div className="rounded-3xl border border-white/10 bg-zinc-950/80 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.35)] backdrop-blur">
-      <div className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">
-        {title}
-      </div>
-      <div className="mt-3 text-3xl font-semibold tracking-tight text-white">
-        {value}
-      </div>
-      {subtitle ? (
-        <div className="mt-2 text-sm text-zinc-400">{subtitle}</div>
-      ) : null}
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+      <div className="text-sm text-zinc-400">{title}</div>
+      <div className="mt-2 text-3xl font-semibold text-white">{value}</div>
+      {subtitle ? <div className="mt-2 text-sm text-zinc-500">{subtitle}</div> : null}
     </div>
   );
 }
 
 export default async function TourVotePage() {
   let votes: TourVoteRow[] = [];
-  let shopifyOrdersForFshCheck: ShopifyOrderForFshCheck[] = [];
-  let metaSpendToday = 0;
-  let metaSpendTotal = 0;
 
   try {
     votes = await prisma.tourVote.findMany({
@@ -219,263 +104,222 @@ export default async function TourVotePage() {
     votes = [];
   }
 
-  try {
-    shopifyOrdersForFshCheck = await prisma.shopifyOrder.findMany({
-      select: {
-        email: true,
-        lineItems: {
-          select: {
-            title: true,
-            sku: true,
-          },
-        },
-      },
-    });
-  } catch {
-    shopifyOrdersForFshCheck = [];
-  }
+  const campaignRows = await Promise.all(
+    TOUR_CAMPAIGNS.map(async (campaign) => {
+      const campaignVotes = votes.filter((vote) =>
+        voteMatchesCampaign(vote, campaign)
+      );
 
-  try {
-    const meta = await getTourMetaSnapshot(TOUR_VOTE_CAMPAIGN_ID);
-    metaSpendToday = typeof meta?.spend?.today === "number" ? meta.spend.today : 0;
-    metaSpendTotal = typeof meta?.spend?.lifetime === "number" ? meta.spend.lifetime : 0;
-  } catch {
-    metaSpendToday = 0;
-    metaSpendTotal = 0;
-  }
+      const signupsToday = campaignVotes.filter((vote) =>
+        isToday(vote.createdAt)
+      ).length;
 
-  const todayVotes = filterVotesByDateKeys(votes, buildRecentDateKeySet(1));
-  const sevenDayVotes = filterVotesByDateKeys(votes, buildRecentDateKeySet(7));
-  const thirtyDayVotes = filterVotesByDateKeys(votes, buildRecentDateKeySet(30));
+      const signupsTotal = campaignVotes.length;
 
-  const totalVotes = votes.length;
-  const todayCount = todayVotes.length;
-  const sevenDayCount = sevenDayVotes.length;
-  const thirtyDayCount = thirtyDayVotes.length;
+      let adSpendToday = 0;
+      let adSpendTotal = 0;
 
-  const topCity = getTopCity(votes);
-  const cityLeaderboard = getCityLeaderboard(votes);
-  const countryLeaderboard = getCountryLeaderboard(votes);
+      if (campaign.metaCampaignId) {
+        try {
+          const meta = await getTourMetaSnapshot(campaign.metaCampaignId);
+          adSpendToday = typeof meta?.spend?.today === "number" ? meta.spend.today : 0;
+          adSpendTotal =
+            typeof meta?.spend?.lifetime === "number" ? meta.spend.lifetime : 0;
+        } catch {
+          adSpendToday = 0;
+          adSpendTotal = 0;
+        }
+      }
 
-  const totalMetaSpend = metaSpendTotal;
+      const costPerSignup =
+        signupsTotal > 0 && adSpendTotal > 0 ? adSpendTotal / signupsTotal : 0;
 
-  const costPerSignupToday =
-    todayCount > 0 ? metaSpendToday / todayCount : 0;
+      return {
+        ...campaign,
+        signupsToday,
+        signupsTotal,
+        adSpendToday,
+        adSpendTotal,
+        costPerSignup,
+      };
+    })
+  );
 
-  const costPerSignupTotal =
-    totalVotes > 0 ? totalMetaSpend / totalVotes : 0;
+  const totalSignupsToday = campaignRows.reduce(
+    (sum, row) => sum + row.signupsToday,
+    0
+  );
 
-  const fshEmailSet = buildFshEmailSet(shopifyOrdersForFshCheck);
-  const audienceQuality = getAudienceQuality(votes, fshEmailSet);
+  const totalSignups = campaignRows.reduce((sum, row) => sum + row.signupsTotal, 0);
+
+  const totalAdSpendToday = campaignRows.reduce(
+    (sum, row) => sum + row.adSpendToday,
+    0
+  );
+
+  const totalAdSpend = campaignRows.reduce((sum, row) => sum + row.adSpendTotal, 0);
+
+  const blendedCostPerSignup =
+    totalSignups > 0 && totalAdSpend > 0 ? totalAdSpend / totalSignups : 0;
 
   return (
-    <main className="min-h-screen bg-[#07090f] text-white">
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <main className="min-h-screen bg-black px-6 py-8 text-white">
+      <div className="mx-auto max-w-7xl">
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <Link
-              href="/"
-              className="mb-3 inline-flex text-sm text-zinc-400 transition hover:text-white"
-            >
+            <Link href="/" className="text-sm text-zinc-400 hover:text-white">
               ← Back to Mission Control
             </Link>
-            <h1 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-              Tour Vote
-            </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400 sm:text-base">
-              Pre-tour data collection from the vote landing page, combined with
-              Meta spend so you can track demand and cost per signup.
-            </p>
-          </div>
 
-          <div className="flex items-center gap-3">
-            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-300">
-              Meta spend today:{" "}
-              <span className="font-semibold text-white">
-                {money(metaSpendToday)}
-              </span>
-            </div>
-            <SyncButton />
+            <h1 className="mt-4 text-4xl font-bold tracking-tight">
+              Tour Campaigns
+            </h1>
+
+            <p className="mt-2 max-w-3xl text-zinc-400">
+              City-level signup and Meta spend tracking for pre-tour campaigns.
+            </p>
           </div>
         </div>
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <section className="mb-8 grid gap-4 md:grid-cols-4">
           <KpiCard
-            title="Total signups"
-            value={String(totalVotes)}
-            subtitle={`${thirtyDayCount} in the last 30 days`}
+            title="Signups Today"
+            value={number(totalSignupsToday)}
+            subtitle="Across all configured campaigns"
           />
+
           <KpiCard
-            title="New audience"
-            value={`${audienceQuality.nonFshPercent.toFixed(1)}%`}
-            subtitle={`${audienceQuality.nonFsh} / ${audienceQuality.totalUniqueTourVoteEmails} are not FSH customers`}
+            title="Total Signups"
+            value={number(totalSignups)}
+            subtitle="Across all configured campaigns"
           />
+
           <KpiCard
-            title="FSH overlap"
-            value={`${audienceQuality.fshPercent.toFixed(1)}%`}
-            subtitle={`${audienceQuality.fshOverlap} existing FSH customers`}
+            title="Ad Spend Today"
+            value={money(totalAdSpendToday)}
+            subtitle="Meta campaign spend today"
           />
+
           <KpiCard
-            title="Signups today"
-            value={String(todayCount)}
-            subtitle={`${sevenDayCount} in the last 7 days`}
-          />
-          <KpiCard
-            title="Top city"
-            value={topCity.city}
+            title="Blended Cost Per Signup"
+            value={blendedCostPerSignup > 0 ? money(blendedCostPerSignup) : "—"}
             subtitle={
-              topCity.count > 0 ? `${topCity.count} total signups` : "No data yet"
-            }
-          />
-          <KpiCard
-            title="Meta spend total"
-            value={money(totalMetaSpend)}
-            subtitle={`Tour campaign lifetime from Meta`}
-          />
-          <KpiCard
-            title="Cost / signup today"
-            value={todayCount > 0 ? money(costPerSignupToday) : "—"}
-            subtitle={
-              todayCount > 0
-                ? `${money(metaSpendToday)} / ${todayCount} signups`
-                : "Waiting for today's first signup"
-            }
-          />
-          <KpiCard
-            title="Cost / signup total"
-            value={totalVotes > 0 ? money(costPerSignupTotal) : "—"}
-            subtitle={
-              totalVotes > 0
-                ? `${money(totalMetaSpend)} / ${totalVotes} total signups`
-                : "No signups yet"
+              totalSignups > 0
+                ? `${money(totalAdSpend)} / ${number(totalSignups)} signups`
+                : "Waiting for signups"
             }
           />
         </section>
 
-        <section className="mt-8 grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-          <div className="rounded-3xl border border-white/10 bg-zinc-950/80 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.35)] backdrop-blur">
-            <div className="mb-5">
-              <h2 className="text-xl font-semibold tracking-tight text-white">
-                City leaderboard
-              </h2>
-              <p className="mt-1 text-sm text-zinc-400">
-                Ranked by total signups captured from the tour vote page.
-              </p>
-            </div>
-
-            <div className="overflow-hidden rounded-2xl border border-white/10">
-              <table className="min-w-full divide-y divide-white/10 text-sm">
-                <thead className="bg-white/5 text-zinc-400">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium">City</th>
-                    <th className="px-4 py-3 text-left font-medium">Signups</th>
-                    <th className="px-4 py-3 text-left font-medium">Share</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/10">
-                  {cityLeaderboard.length === 0 ? (
-                    <tr>
-                      <td colSpan={3} className="px-4 py-6 text-zinc-500">
-                        No signups yet.
-                      </td>
-                    </tr>
-                  ) : (
-                    cityLeaderboard.map((row) => {
-                      const share =
-                        totalVotes > 0
-                          ? `${((row.count / totalVotes) * 100).toFixed(1)}%`
-                          : "0%";
-
-                      return (
-                        <tr key={row.city}>
-                          <td className="px-4 py-3 text-white">{row.city}</td>
-                          <td className="px-4 py-3 text-zinc-300">{row.count}</td>
-                          <td className="px-4 py-3 text-zinc-400">{share}</td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+        <section className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
+          <div className="border-b border-white/10 px-5 py-4">
+            <h2 className="text-xl font-semibold">Campaign performance</h2>
+            <p className="mt-1 text-sm text-zinc-400">
+              One row per city campaign. Add or edit rows in{" "}
+              <code className="rounded bg-white/10 px-1 py-0.5">
+                lib/tour-campaigns.ts
+              </code>
+              .
+            </p>
           </div>
 
-          <div className="space-y-6">
-            <div className="rounded-3xl border border-white/10 bg-zinc-950/80 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.35)] backdrop-blur">
-              <h2 className="text-xl font-semibold tracking-tight text-white">
-                Country split
-              </h2>
-              <p className="mt-1 text-sm text-zinc-400">
-                Broad market demand before you zoom into cities.
-              </p>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-left text-sm">
+              <thead className="border-b border-white/10 text-xs uppercase tracking-wide text-zinc-500">
+                <tr>
+                  <th className="px-5 py-3">City</th>
+                  <th className="px-5 py-3">Source</th>
+                  <th className="px-5 py-3 text-right">Signups Today</th>
+                  <th className="px-5 py-3 text-right">Signups Total</th>
+                  <th className="px-5 py-3 text-right">Ad Spend Today</th>
+                  <th className="px-5 py-3 text-right">Ad Spend Total</th>
+                  <th className="px-5 py-3 text-right">Cost Per Signup</th>
+                </tr>
+              </thead>
 
-              <div className="mt-4 space-y-3">
-                {countryLeaderboard.length === 0 ? (
-                  <div className="text-sm text-zinc-500">No signups yet.</div>
-                ) : (
-                  countryLeaderboard.map((row) => (
-                    <div
-                      key={row.country}
-                      className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
-                    >
-                      <div className="text-sm text-white">{row.country}</div>
-                      <div className="text-sm font-semibold text-zinc-300">
-                        {row.count}
-                      </div>
-                    </div>
-                  ))
-                )}
+              <tbody>
+                {campaignRows.map((row) => (
+                  <tr key={row.city} className="border-b border-white/5">
+                    <td className="px-5 py-4">
+                      <div className="font-medium text-white">{row.city}</div>
+                      <div className="text-xs text-zinc-500">{row.country}</div>
+                    </td>
+
+                    <td className="px-5 py-4 text-zinc-300">
+                      <code className="rounded bg-white/10 px-2 py-1 text-xs">
+                        {row.source}
+                      </code>
+                    </td>
+
+                    <td className="px-5 py-4 text-right text-zinc-200">
+                      {number(row.signupsToday)}
+                    </td>
+
+                    <td className="px-5 py-4 text-right text-zinc-200">
+                      {number(row.signupsTotal)}
+                    </td>
+
+                    <td className="px-5 py-4 text-right text-zinc-200">
+                      {row.metaCampaignId ? money(row.adSpendToday) : "—"}
+                    </td>
+
+                    <td className="px-5 py-4 text-right text-zinc-200">
+                      {row.metaCampaignId ? money(row.adSpendTotal) : "—"}
+                    </td>
+
+                    <td className="px-5 py-4 text-right font-medium text-white">
+                      {row.costPerSignup > 0 ? money(row.costPerSignup) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="mt-8 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+          <h2 className="text-xl font-semibold">Recent signups</h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Latest submissions across all tour signup campaigns.
+          </p>
+
+          <div className="mt-5 grid gap-3">
+            {votes.length === 0 ? (
+              <div className="rounded-xl border border-white/10 p-4 text-sm text-zinc-400">
+                No signups yet.
               </div>
-            </div>
-
-            <div className="rounded-3xl border border-white/10 bg-zinc-950/80 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.35)] backdrop-blur">
-              <h2 className="text-xl font-semibold tracking-tight text-white">
-                Recent signups
-              </h2>
-              <p className="mt-1 text-sm text-zinc-400">
-                Latest submissions from the landing page.
-              </p>
-
-              <div className="mt-4 space-y-3">
-                {votes.length === 0 ? (
-                  <div className="text-sm text-zinc-500">No signups yet.</div>
-                ) : (
-                  votes.slice(0, 12).map((vote) => (
-                    <div
-                      key={vote.id}
-                      className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <div className="font-medium text-white">
-                            {vote.name}
-                          </div>
-                          <div className="text-sm text-zinc-400">
-                            {vote.email}
-                          </div>
-                        </div>
-                        <div className="text-right text-xs text-zinc-500">
-                          {formatDateTime(vote.createdAt)}
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-zinc-300">
-                          Selected: {vote.selectedCity}, {vote.selectedCountry}
-                        </span>
-
-                        {vote.inferredCity || vote.inferredCountry ? (
-                          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-zinc-400">
-                            Inferred: {vote.inferredCity || "—"},{" "}
-                            {vote.inferredCountry || "—"}
-                          </span>
-                        ) : null}
-                      </div>
+            ) : (
+              votes.slice(0, 12).map((vote) => (
+                <div
+                  key={vote.id}
+                  className="rounded-xl border border-white/10 bg-black/30 p-4"
+                >
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="font-medium text-white">{vote.name}</div>
+                      <div className="text-sm text-zinc-400">{vote.email}</div>
                     </div>
-                  ))
-                )}
-              </div>
-            </div>
+
+                    <div className="text-sm text-zinc-500">
+                      {formatDateTime(vote.createdAt)}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 text-sm text-zinc-400">
+                    Selected: {vote.selectedCity}, {vote.selectedCountry}
+                    {vote.source ? (
+                      <>
+                        {" "}
+                        · Source:{" "}
+                        <code className="rounded bg-white/10 px-1 py-0.5 text-xs">
+                          {vote.source}
+                        </code>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </section>
       </div>
