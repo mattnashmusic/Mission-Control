@@ -80,6 +80,7 @@ function KpiCard({
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
       <div className="text-sm text-zinc-400">{title}</div>
       <div className="mt-2 text-3xl font-semibold text-white">{value}</div>
+
       {subtitle ? (
         <div className="mt-2 text-sm text-zinc-500">{subtitle}</div>
       ) : null}
@@ -214,7 +215,7 @@ export default async function TourVotePage() {
           </div>
         </div>
 
-        <section className="mb-8 grid gap-4 md:grid-cols-5">
+        <section className="mb-8 grid gap-4 md:grid-cols-6">
           <KpiCard
             title="Signups Today"
             value={number(totalSignupsToday)}
@@ -231,6 +232,12 @@ export default async function TourVotePage() {
             title="Ad Spend Today"
             value={money(totalAdSpendToday)}
             subtitle="Meta campaign spend today"
+          />
+
+          <KpiCard
+            title="Ad Spend Total"
+            value={money(totalAdSpend)}
+            subtitle="Total spend across all campaigns"
           />
 
           <KpiCard
