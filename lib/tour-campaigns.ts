@@ -29,7 +29,7 @@ export const TOUR_CAMPAIGNS: TourCampaignConfig[] = [
     country: "Netherlands",
     source: "amsterdam_lp",
     matchSources: ["amsterdam_lp"],
-    metaCampaignId: "",
+    metaCampaignId: "120244570933250724",
   },
   {
     city: "Cologne LP",

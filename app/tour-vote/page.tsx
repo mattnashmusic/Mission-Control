@@ -129,7 +129,9 @@ export default async function TourVotePage() {
           const meta = await getTourMetaSnapshot(campaign.metaCampaignId);
 
           adSpendToday =
-            typeof meta?.spend?.today === "number" ? meta.spend.today : 0;
+            typeof meta?.spend?.today === "number"
+              ? meta.spend.today
+              : 0;
 
           adSpendTotal =
             typeof meta?.spend?.lifetime === "number"
@@ -189,7 +191,9 @@ export default async function TourVotePage() {
       : 0;
 
   const blendedCostPerSignupTotal =
-    totalSignups > 0 && totalAdSpend > 0 ? totalAdSpend / totalSignups : 0;
+    totalSignups > 0 && totalAdSpend > 0
+      ? totalAdSpend / totalSignups
+      : 0;
 
   return (
     <main className="min-h-screen bg-black px-6 py-8 text-white">
@@ -263,9 +267,9 @@ export default async function TourVotePage() {
         <section className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
           <div className="border-b border-white/10 px-5 py-4">
             <h2 className="text-xl font-semibold">Campaign performance</h2>
+
             <p className="mt-1 text-sm text-zinc-400">
-              Campaign rows match signups by source only. Manual spend overrides
-              can be set in <code className="rounded bg-white/10 px-1 py-0.5">lib/tour-campaigns.ts</code>.
+              Campaign rows match signups by source only.
             </p>
           </div>
 
@@ -289,8 +293,13 @@ export default async function TourVotePage() {
                 {campaignRows.map((row) => (
                   <tr key={row.source} className="border-b border-white/5">
                     <td className="px-5 py-4">
-                      <div className="font-medium text-white">{row.city}</div>
-                      <div className="text-xs text-zinc-500">{row.country}</div>
+                      <div className="font-medium text-white">
+                        {row.city}
+                      </div>
+
+                      <div className="text-xs text-zinc-500">
+                        {row.country}
+                      </div>
                     </td>
 
                     <td className="px-5 py-4 text-zinc-300">
@@ -353,6 +362,7 @@ export default async function TourVotePage() {
 
         <section className="mt-8 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
           <h2 className="text-xl font-semibold">Recent signups</h2>
+
           <p className="mt-1 text-sm text-zinc-400">
             Latest submissions across all tour signup campaigns.
           </p>
@@ -370,8 +380,13 @@ export default async function TourVotePage() {
                 >
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                      <div className="font-medium text-white">{vote.name}</div>
-                      <div className="text-sm text-zinc-400">{vote.email}</div>
+                      <div className="font-medium text-white">
+                        {vote.name}
+                      </div>
+
+                      <div className="text-sm text-zinc-400">
+                        {vote.email}
+                      </div>
                     </div>
 
                     <div className="text-sm text-zinc-500">
@@ -381,6 +396,15 @@ export default async function TourVotePage() {
 
                   <div className="mt-3 text-sm text-zinc-400">
                     Selected: {vote.selectedCity}, {vote.selectedCountry}
+
+                    {vote.inferredCity || vote.inferredCountry ? (
+                      <>
+                        {" "}
+                        · Inferred: {vote.inferredCity || "Unknown"},{" "}
+                        {vote.inferredCountry || "Unknown"}
+                      </>
+                    ) : null}
+
                     {vote.source ? (
                       <>
                         {" "}
