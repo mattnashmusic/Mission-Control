@@ -36,14 +36,14 @@ export const TOUR_CAMPAIGNS: TourCampaignConfig[] = [
     country: "Germany",
     source: "cologne_lp",
     matchSources: ["cologne_lp"],
-    metaCampaignId: "",
+    metaCampaignId: "120244639022270724",
   },
   {
     city: "Berlin LP",
     country: "Germany",
     source: "berlin_lp",
     matchSources: ["berlin_lp"],
-    metaCampaignId: "",
+    metaCampaignId: "120244638610400724",
   },
   {
     city: "Brussels LP",
