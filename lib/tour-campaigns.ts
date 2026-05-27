@@ -50,6 +50,6 @@ export const TOUR_CAMPAIGNS: TourCampaignConfig[] = [
     country: "Belgium",
     source: "brussels_lp",
     matchSources: ["brussels_lp"],
-    metaCampaignId: "",
+    metaCampaignId: "120244728123040724",
   },
 ];
