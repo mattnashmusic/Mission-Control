@@ -16,6 +16,7 @@ export const TOUR_CAMPAIGNS: TourCampaignConfig[] = [
     matchSources: ["hamburg_lp"],
     metaCampaignId: "120244349071170724",
   },
+
   {
     city: "Tour Vote",
     country: "Multi-country",
@@ -24,6 +25,7 @@ export const TOUR_CAMPAIGNS: TourCampaignConfig[] = [
     metaCampaignId: "",
     manualAdSpendTotal: 370.16,
   },
+
   {
     city: "Amsterdam LP",
     country: "Netherlands",
@@ -31,6 +33,7 @@ export const TOUR_CAMPAIGNS: TourCampaignConfig[] = [
     matchSources: ["amsterdam_lp"],
     metaCampaignId: "120244570933250724",
   },
+
   {
     city: "Cologne LP",
     country: "Germany",
@@ -38,6 +41,7 @@ export const TOUR_CAMPAIGNS: TourCampaignConfig[] = [
     matchSources: ["cologne_lp"],
     metaCampaignId: "120244639022270724",
   },
+
   {
     city: "Berlin LP",
     country: "Germany",
@@ -45,11 +49,28 @@ export const TOUR_CAMPAIGNS: TourCampaignConfig[] = [
     matchSources: ["berlin_lp"],
     metaCampaignId: "120244638610400724",
   },
+
   {
     city: "Brussels LP",
     country: "Belgium",
     source: "brussels_lp",
     matchSources: ["brussels_lp"],
     metaCampaignId: "120244728123040724",
+  },
+
+  {
+    city: "Zurich LP",
+    country: "Switzerland",
+    source: "zurich_lp",
+    matchSources: ["zurich_lp"],
+    metaCampaignId: "",
+  },
+
+  {
+    city: "Munich LP",
+    country: "Germany",
+    source: "munich_lp",
+    matchSources: ["munich_lp"],
+    metaCampaignId: "",
   },
 ];
