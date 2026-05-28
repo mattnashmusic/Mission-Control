@@ -63,7 +63,7 @@ export const TOUR_CAMPAIGNS: TourCampaignConfig[] = [
     country: "Switzerland",
     source: "zurich_lp",
     matchSources: ["zurich_lp"],
-    metaCampaignId: "",
+    metaCampaignId: "120244841243780724",
   },
 
   {
