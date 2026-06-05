@@ -1,11 +1,18 @@
-type EventbritePagination = {
-  has_more_items?: boolean;
-  continuation?: string;
+type EventbriteAttendee = {
+  id?: string;
+  status?: string;
+  cancelled?: boolean;
+  refunded?: boolean;
 };
 
 type EventbriteAttendeesResponse = {
-  attendees?: unknown[];
-  pagination?: EventbritePagination;
+  pagination?: {
+    object_count?: number;
+    page_number?: number;
+    page_count?: number;
+    has_more_items?: boolean;
+  };
+  attendees?: EventbriteAttendee[];
 };
 
 const EVENTBRITE_EVENT_IDS_BY_SLUG: Record<string, string> = {
@@ -32,46 +39,35 @@ export async function getEventbriteTicketSalesBySlug(slug: string) {
     return null;
   }
 
-  let total = 0;
-  let continuation: string | undefined;
-
-  do {
-    const url = new URL(
-      `https://www.eventbriteapi.com/v3/events/${eventId}/attendees/`
-    );
-
-    url.searchParams.set("page_size", "200");
-
-    if (continuation) {
-      url.searchParams.set("continuation", continuation);
-    }
-
-    const response = await fetch(url.toString(), {
+  const response = await fetch(
+    `https://www.eventbriteapi.com/v3/events/${eventId}/attendees/`,
+    {
       headers: {
         Authorization: `Bearer ${token}`,
       },
       next: {
         revalidate: 300,
       },
-    });
-
-    if (!response.ok) {
-      console.error(
-        `Eventbrite API error for ${slug}:`,
-        response.status,
-        await response.text()
-      );
-      return null;
     }
+  );
 
-    const data = (await response.json()) as EventbriteAttendeesResponse;
+  if (!response.ok) {
+    console.error(
+      `Eventbrite API error for ${slug}:`,
+      response.status,
+      await response.text()
+    );
+    return null;
+  }
 
-    total += data.attendees?.length ?? 0;
+  const data = (await response.json()) as EventbriteAttendeesResponse;
 
-    continuation = data.pagination?.has_more_items
-      ? data.pagination.continuation
-      : undefined;
-  } while (continuation);
+  const attendees = data.attendees ?? [];
 
-  return total;
+  return attendees.filter((attendee) => {
+    if (attendee.cancelled) return false;
+    if (attendee.refunded) return false;
+    if (attendee.status && attendee.status !== "Attending") return false;
+    return true;
+  }).length;
 }
