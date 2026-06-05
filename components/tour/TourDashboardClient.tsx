@@ -403,6 +403,7 @@ export default function TourDashboardClient({
                   <th className="px-4 py-3 font-medium">City</th>
                   <th className="px-4 py-3 font-medium">Venue</th>
                   <th className="px-4 py-3 text-right font-medium">Tickets Sold</th>
+                  <th className="px-4 py-3 text-right font-medium">Revenue</th>
                   <th className="px-4 py-3 text-right font-medium">Capacity</th>
                   <th className="px-4 py-3 text-right font-medium">% Sold</th>
                   <th className="px-4 py-3 text-right font-medium">Ad Spend</th>
@@ -432,6 +433,9 @@ export default function TourDashboardClient({
                         <td className="px-4 py-4">{show.city}</td>
                         <td className="px-4 py-4 text-zinc-300">{show.venue}</td>
                         <td className="px-4 py-4 text-right">{show.ticketSales}</td>
+                        <td className="px-4 py-4 text-right font-medium text-emerald-400">
+                          {money(revenue)}
+                        </td>
                         <td className="px-4 py-4 text-right text-zinc-400">
                           {show.capacity}
                         </td>
@@ -444,7 +448,7 @@ export default function TourDashboardClient({
 
                       {isExpanded ? (
                         <tr className="border-t border-zinc-800 bg-zinc-950/50">
-                          <td colSpan={8} className="px-5 py-5">
+                          <td colSpan={9} className="px-5 py-5">
                             <div className="grid gap-5 xl:grid-cols-[1.3fr_1fr]">
                               <div className="space-y-5">
                                 <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
