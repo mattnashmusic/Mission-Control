@@ -53,16 +53,14 @@ export async function getEventbriteShowStatsBySlug(
     return null;
   }
 
-  const response = await fetch(
-    `https://www.eventbriteapi.com/v3/events/${eventId}/attendees/`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      next: {
-        revalidate: 300,
-      },
-    }
+const response = await fetch(
+  `https://www.eventbriteapi.com/v3/events/${eventId}/attendees/`,
+  {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  }
   );
 
   if (!response.ok) {
