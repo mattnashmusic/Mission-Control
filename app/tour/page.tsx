@@ -1,6 +1,7 @@
 import TourDashboardClient, {
   type TourShow,
 } from "@/components/tour/TourDashboardClient";
+import { getEventbriteTicketSalesBySlug } from "@/lib/eventbrite";
 import { prisma } from "@/lib/prisma";
 
 export default async function TourPage() {
@@ -13,24 +14,32 @@ export default async function TourPage() {
     }),
   ]);
 
-  const initialShows: TourShow[] = shows.map((show: (typeof shows)[number]) => ({
-    id: show.id,
-    slug: show.slug,
-    date: show.date.toISOString(),
-    city: show.city,
-    country: show.country,
-    venue: show.venue,
-    capacity: show.capacity,
-    ticketPrice: show.ticketPrice,
-    ticketSales: show.ticketSales,
-    metaSpend: show.metaSpend,
-    notes: show.notes,
-    costs: {
-      venueHire: show.venueHire,
-      production: show.production,
-      hotelPetrolMisc: show.hotelPetrolMisc,
-    },
-  }));
+  const initialShows: TourShow[] = await Promise.all(
+    shows.map(async (show: (typeof shows)[number]) => {
+      const eventbriteTicketSales = await getEventbriteTicketSalesBySlug(
+        show.slug
+      );
+
+      return {
+        id: show.id,
+        slug: show.slug,
+        date: show.date.toISOString(),
+        city: show.city,
+        country: show.country,
+        venue: show.venue,
+        capacity: show.capacity,
+        ticketPrice: show.ticketPrice,
+        ticketSales: eventbriteTicketSales ?? show.ticketSales,
+        metaSpend: show.metaSpend,
+        notes: show.notes,
+        costs: {
+          venueHire: show.venueHire,
+          production: show.production,
+          hotelPetrolMisc: show.hotelPetrolMisc,
+        },
+      };
+    })
+  );
 
   return (
     <TourDashboardClient
