@@ -1,8 +1,15 @@
+type EventbriteMoney = {
+  major_value?: string;
+};
+
 type EventbriteAttendee = {
   id?: string;
   status?: string;
   cancelled?: boolean;
   refunded?: boolean;
+  costs?: {
+    base_price?: EventbriteMoney;
+  };
 };
 
 type EventbriteAttendeesResponse = {
@@ -15,6 +22,11 @@ type EventbriteAttendeesResponse = {
   attendees?: EventbriteAttendee[];
 };
 
+export type EventbriteShowStats = {
+  ticketSales: number;
+  ticketRevenue: number;
+};
+
 const EVENTBRITE_EVENT_IDS_BY_SLUG: Record<string, string> = {
   "hamburg-2026": "1989791795825",
   "berlin-2026": "1990698520864",
@@ -25,7 +37,9 @@ const EVENTBRITE_EVENT_IDS_BY_SLUG: Record<string, string> = {
   "amsterdam-2026": "1990699029385",
 };
 
-export async function getEventbriteTicketSalesBySlug(slug: string) {
+export async function getEventbriteShowStatsBySlug(
+  slug: string
+): Promise<EventbriteShowStats | null> {
   const eventId = EVENTBRITE_EVENT_IDS_BY_SLUG[slug];
 
   if (!eventId) {
@@ -62,12 +76,20 @@ export async function getEventbriteTicketSalesBySlug(slug: string) {
 
   const data = (await response.json()) as EventbriteAttendeesResponse;
 
-  const attendees = data.attendees ?? [];
-
-  return attendees.filter((attendee) => {
+  const validAttendees = (data.attendees ?? []).filter((attendee) => {
     if (attendee.cancelled) return false;
     if (attendee.refunded) return false;
     if (attendee.status && attendee.status !== "Attending") return false;
     return true;
-  }).length;
+  });
+
+  const ticketRevenue = validAttendees.reduce((sum, attendee) => {
+    const basePrice = Number(attendee.costs?.base_price?.major_value ?? 0);
+    return sum + basePrice;
+  }, 0);
+
+  return {
+    ticketSales: validAttendees.length,
+    ticketRevenue,
+  };
 }

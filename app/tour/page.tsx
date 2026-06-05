@@ -1,7 +1,7 @@
 import TourDashboardClient, {
   type TourShow,
 } from "@/components/tour/TourDashboardClient";
-import { getEventbriteTicketSalesBySlug } from "@/lib/eventbrite";
+import { getEventbriteShowStatsBySlug } from "@/lib/eventbrite";
 import { prisma } from "@/lib/prisma";
 
 export default async function TourPage() {
@@ -16,9 +16,7 @@ export default async function TourPage() {
 
   const initialShows: TourShow[] = await Promise.all(
     shows.map(async (show: (typeof shows)[number]) => {
-      const eventbriteTicketSales = await getEventbriteTicketSalesBySlug(
-        show.slug
-      );
+      const eventbriteStats = await getEventbriteShowStatsBySlug(show.slug);
 
       return {
         id: show.id,
@@ -29,7 +27,9 @@ export default async function TourPage() {
         venue: show.venue,
         capacity: show.capacity,
         ticketPrice: show.ticketPrice,
-        ticketSales: eventbriteTicketSales ?? show.ticketSales,
+        ticketSales: eventbriteStats?.ticketSales ?? show.ticketSales,
+        ticketRevenue:
+          eventbriteStats?.ticketRevenue ?? show.ticketSales * show.ticketPrice,
         metaSpend: show.metaSpend,
         notes: show.notes,
         costs: {

@@ -17,6 +17,7 @@ export type TourShow = {
   capacity: number;
   ticketPrice: number;
   ticketSales: number;
+  ticketRevenue: number;
   metaSpend: number;
   notes?: string | null;
   costs: {
@@ -81,7 +82,7 @@ function calculateBreakEvenTickets(show: TourShow) {
 }
 
 function calculateRevenue(show: TourShow) {
-  return show.ticketSales * show.ticketPrice;
+  return show.ticketRevenue;
 }
 
 function calculateProfitLoss(show: TourShow) {
