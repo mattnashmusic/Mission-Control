@@ -7,6 +7,13 @@ import {
   type EditableTourSettingField,
 } from "@/lib/tour-settings-client";
 
+export type DailyTicketSalesPoint = {
+  date: string;
+  label: string;
+  ticketSales: number;
+  ticketRevenue: number;
+};
+
 export type TourShow = {
   id: string;
   slug: string;
@@ -18,6 +25,7 @@ export type TourShow = {
   ticketPrice: number;
   ticketSales: number;
   ticketRevenue: number;
+  dailyTicketSales: DailyTicketSalesPoint[];
   metaSpend: number;
   notes?: string | null;
   costs: {
@@ -57,6 +65,13 @@ function formatDate(dateString: string) {
     month: "2-digit",
     year: "2-digit",
   }).format(new Date(dateString));
+}
+
+function formatChartDate(dateString: string) {
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+  }).format(new Date(`${dateString}T00:00:00`));
 }
 
 function calculateShowTotalCost(show: TourShow) {
@@ -118,6 +133,81 @@ function KpiCard({
   );
 }
 
+function DailyTicketSalesChart({
+  data,
+}: {
+  data: DailyTicketSalesPoint[];
+}) {
+  const maxTickets = Math.max(...data.map((point) => point.ticketSales), 0);
+  const totalTickets = data.reduce((sum, point) => sum + point.ticketSales, 0);
+  const totalRevenue = data.reduce((sum, point) => sum + point.ticketRevenue, 0);
+
+  return (
+    <section className="mb-8 rounded-3xl border border-zinc-800 bg-zinc-900/90 p-5">
+      <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h2 className="text-2xl font-semibold text-white">Daily Ticket Sales</h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Live Eventbrite sales grouped by purchase date across the tour. Revenue excludes Eventbrite fees.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 text-right">
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 px-4 py-3">
+            <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Tickets</div>
+            <div className="mt-1 text-xl font-semibold text-white">{totalTickets}</div>
+          </div>
+
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 px-4 py-3">
+            <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Revenue</div>
+            <div className="mt-1 text-xl font-semibold text-white">{money(totalRevenue)}</div>
+          </div>
+        </div>
+      </div>
+
+      {data.length === 0 ? (
+        <div className="flex h-64 items-center justify-center rounded-2xl border border-dashed border-zinc-700 bg-zinc-950/50 text-sm text-zinc-500">
+          No Eventbrite ticket sales data yet.
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
+          <div className="flex h-72 items-end gap-3 overflow-x-auto pb-2">
+            {data.map((point) => {
+              const heightPercent =
+                maxTickets === 0 ? 0 : Math.max((point.ticketSales / maxTickets) * 100, 8);
+
+              return (
+                <div
+                  key={point.date}
+                  className="flex min-w-[72px] flex-1 flex-col items-center justify-end gap-2"
+                  title={`${formatChartDate(point.date)}: ${point.ticketSales} tickets, ${money(
+                    point.ticketRevenue
+                  )}`}
+                >
+                  <div className="text-xs font-medium text-zinc-300">
+                    {point.ticketSales}
+                  </div>
+
+                  <div className="flex h-48 w-full items-end rounded-xl bg-zinc-900/80 p-1">
+                    <div
+                      className="w-full rounded-lg bg-emerald-400/80 transition hover:bg-emerald-300"
+                      style={{ height: `${heightPercent}%` }}
+                    />
+                  </div>
+
+                  <div className="text-center text-xs text-zinc-500">
+                    {formatChartDate(point.date)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function TourDashboardClient({
   initialShows,
   initialSettings,
@@ -127,6 +217,7 @@ export default function TourDashboardClient({
 }) {
   const [shows, setShows] = useState<TourShow[]>(initialShows);
   const [expandedShowId, setExpandedShowId] = useState<string | null>(null);
+  const [tourEconomicsOpen, setTourEconomicsOpen] = useState(false);
   const [plannedAdBudget, setPlannedAdBudget] = useState<number>(
     initialSettings.plannedAdBudget
   );
@@ -146,6 +237,10 @@ export default function TourDashboardClient({
     const ticketsSoldTotal = shows.reduce((sum, show) => sum + show.ticketSales, 0);
     const totalCapacity = shows.reduce((sum, show) => sum + show.capacity, 0);
     const adSpendTotal = shows.reduce((sum, show) => sum + show.metaSpend, 0);
+    const totalRevenue = shows.reduce(
+      (sum, show) => sum + calculateRevenue(show),
+      0
+    );
     const percentTourSold =
       totalCapacity === 0 ? 0 : (ticketsSoldTotal / totalCapacity) * 100;
     const costPerTicket =
@@ -175,6 +270,7 @@ export default function TourDashboardClient({
       upcomingShows,
       ticketsSoldTotal,
       adSpendTotal,
+      totalRevenue,
       percentTourSold,
       costPerTicket,
       totalTourBaseCosts,
@@ -185,6 +281,31 @@ export default function TourDashboardClient({
       forecastProfit,
     };
   }, [shows, plannedAdBudget, blendedCpt]);
+
+  const dailyTicketSales = useMemo(() => {
+    const salesByDate = new Map<string, DailyTicketSalesPoint>();
+
+    shows.forEach((show) => {
+      show.dailyTicketSales.forEach((point) => {
+        const existing = salesByDate.get(point.date);
+
+        if (existing) {
+          existing.ticketSales += point.ticketSales;
+          existing.ticketRevenue += point.ticketRevenue;
+          return;
+        }
+
+        salesByDate.set(point.date, { ...point });
+      });
+    });
+
+    return Array.from(salesByDate.values())
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((point) => ({
+        ...point,
+        label: formatChartDate(point.date),
+      }));
+  }, [shows]);
 
   function updateShow(
     showId: string,
@@ -298,94 +419,19 @@ export default function TourDashboardClient({
           </p>
         </header>
 
-        <section className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <section className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
           <KpiCard title="🎫 Upcoming Shows" value={String(kpis.upcomingShows)} />
-          <KpiCard title="📈 Tickets Sold Total" value={String(kpis.ticketsSoldTotal)} />
-          <KpiCard title="📣 Ad Spend So Far" value={money(kpis.adSpendTotal)} />
+          <KpiCard title="📈 Total Tickets Sold" value={String(kpis.ticketsSoldTotal)} />
+          <KpiCard title="💰 Total Revenue" value={money(kpis.totalRevenue)} />
           <KpiCard title="% of Tour Sold" value={percent(kpis.percentTourSold)} />
+          <KpiCard title="📣 Ad Spend" value={money(kpis.adSpendTotal)} />
           <KpiCard
             title="💸 Cost Per Ticket"
             value={kpis.ticketsSoldTotal === 0 ? "—" : money(kpis.costPerTicket)}
           />
         </section>
 
-        <section className="mb-8 rounded-3xl border border-zinc-800 bg-zinc-900/90 p-5">
-          <div className="mb-5">
-            <h2 className="text-2xl font-semibold text-white">Tour Economics</h2>
-            <p className="mt-1 text-sm text-zinc-400">
-              Editable planning assumptions for forecasting revenue and profit across the tour.
-            </p>
-          </div>
-
-          <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <label className="grid gap-2 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
-              <span className="text-sm text-zinc-400">Planned Ad Budget</span>
-              <input
-                type="number"
-                value={plannedAdBudget}
-                onChange={(e) => setPlannedAdBudget(Number(e.target.value) || 0)}
-                onBlur={(e) =>
-                  persistSetting(
-                    "plannedAdBudget",
-                    Number(e.target.value) || 0
-                  )
-                }
-                className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
-              />
-              {renderSettingSaveStatus("plannedAdBudget")}
-            </label>
-
-            <label className="grid gap-2 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
-              <span className="text-sm text-zinc-400">Blended CPT</span>
-              <input
-                type="number"
-                value={blendedCpt}
-                onChange={(e) => setBlendedCpt(Number(e.target.value) || 0)}
-                onBlur={(e) =>
-                  persistSetting(
-                    "blendedCpt",
-                    Number(e.target.value) || 0
-                  )
-                }
-                className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
-              />
-              {renderSettingSaveStatus("blendedCpt")}
-            </label>
-
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
-              <div className="text-sm text-zinc-400">Weighted Avg Ticket Price</div>
-              <div className="mt-2 text-2xl font-semibold text-white">
-                {money(kpis.weightedAverageTicketPrice)}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
-              <div className="text-sm text-zinc-400">Base Tour Costs</div>
-              <div className="mt-2 text-2xl font-semibold text-white">
-                {money(kpis.totalTourBaseCosts)}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <KpiCard title="Total Tour Costs" value={money(kpis.totalTourCosts)} />
-            <KpiCard
-              title="Forecast Tickets Sold"
-              value={kpis.forecastTicketsSold.toFixed(0)}
-            />
-            <KpiCard
-              title="Expected Revenue"
-              value={money(kpis.expectedRevenue)}
-            />
-            <KpiCard
-              title="Forecast Profit"
-              value={signedMoney(kpis.forecastProfit)}
-              valueClassName={
-                kpis.forecastProfit >= 0 ? "text-emerald-400" : "text-rose-400"
-              }
-            />
-          </div>
-        </section>
+        <DailyTicketSalesChart data={dailyTicketSales} />
 
         <section className="rounded-3xl border border-zinc-800 bg-zinc-900/90 p-5">
           <div className="mb-4">
@@ -729,6 +775,97 @@ export default function TourDashboardClient({
               </tbody>
             </table>
           </div>
+        </section>
+        <section className="mt-8 rounded-3xl border border-zinc-800 bg-zinc-900/90 p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-semibold text-white">Tour Economics</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Editable planning assumptions for forecasting revenue and profit across the tour.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setTourEconomicsOpen((current) => !current)}
+              className="rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2 text-sm font-medium text-zinc-200 transition hover:border-zinc-500 hover:bg-zinc-900"
+            >
+              {tourEconomicsOpen ? "Hide" : "Show"}
+            </button>
+          </div>
+
+          {tourEconomicsOpen ? (
+            <div className="mt-5">
+            <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <label className="grid gap-2 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
+                <span className="text-sm text-zinc-400">Planned Ad Budget</span>
+                <input
+                  type="number"
+                  value={plannedAdBudget}
+                  onChange={(e) => setPlannedAdBudget(Number(e.target.value) || 0)}
+                  onBlur={(e) =>
+                    persistSetting(
+                      "plannedAdBudget",
+                      Number(e.target.value) || 0
+                    )
+                  }
+                  className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
+                />
+                {renderSettingSaveStatus("plannedAdBudget")}
+              </label>
+  
+              <label className="grid gap-2 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
+                <span className="text-sm text-zinc-400">Blended CPT</span>
+                <input
+                  type="number"
+                  value={blendedCpt}
+                  onChange={(e) => setBlendedCpt(Number(e.target.value) || 0)}
+                  onBlur={(e) =>
+                    persistSetting(
+                      "blendedCpt",
+                      Number(e.target.value) || 0
+                    )
+                  }
+                  className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
+                />
+                {renderSettingSaveStatus("blendedCpt")}
+              </label>
+  
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
+                <div className="text-sm text-zinc-400">Weighted Avg Ticket Price</div>
+                <div className="mt-2 text-2xl font-semibold text-white">
+                  {money(kpis.weightedAverageTicketPrice)}
+                </div>
+              </div>
+  
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
+                <div className="text-sm text-zinc-400">Base Tour Costs</div>
+                <div className="mt-2 text-2xl font-semibold text-white">
+                  {money(kpis.totalTourBaseCosts)}
+                </div>
+              </div>
+            </div>
+  
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <KpiCard title="Total Tour Costs" value={money(kpis.totalTourCosts)} />
+              <KpiCard
+                title="Forecast Tickets Sold"
+                value={kpis.forecastTicketsSold.toFixed(0)}
+              />
+              <KpiCard
+                title="Expected Revenue"
+                value={money(kpis.expectedRevenue)}
+              />
+              <KpiCard
+                title="Forecast Profit"
+                value={signedMoney(kpis.forecastProfit)}
+                valueClassName={
+                  kpis.forecastProfit >= 0 ? "text-emerald-400" : "text-rose-400"
+                }
+              />
+            </div>
+            </div>
+          ) : null}
         </section>
       </div>
     </main>

@@ -30,6 +30,7 @@ export default async function TourPage() {
         ticketSales: eventbriteStats?.ticketSales ?? show.ticketSales,
         ticketRevenue:
           eventbriteStats?.ticketRevenue ?? show.ticketSales * show.ticketPrice,
+        dailyTicketSales: eventbriteStats?.dailyTicketSales ?? [],
         metaSpend: show.metaSpend,
         notes: show.notes,
         costs: {

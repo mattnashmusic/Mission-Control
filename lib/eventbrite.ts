@@ -7,6 +7,7 @@ type EventbriteAttendee = {
   status?: string;
   cancelled?: boolean;
   refunded?: boolean;
+  created?: string;
   costs?: {
     base_price?: EventbriteMoney;
   };
@@ -22,9 +23,17 @@ type EventbriteAttendeesResponse = {
   attendees?: EventbriteAttendee[];
 };
 
+export type DailyTicketSalesPoint = {
+  date: string;
+  label: string;
+  ticketSales: number;
+  ticketRevenue: number;
+};
+
 export type EventbriteShowStats = {
   ticketSales: number;
   ticketRevenue: number;
+  dailyTicketSales: DailyTicketSalesPoint[];
 };
 
 const EVENTBRITE_EVENT_IDS_BY_SLUG: Record<string, string> = {
@@ -36,6 +45,24 @@ const EVENTBRITE_EVENT_IDS_BY_SLUG: Record<string, string> = {
   "brussels-2026": "1990699004310",
   "amsterdam-2026": "1990699029385",
 };
+
+function formatDailySalesLabel(dateString: string) {
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+  }).format(new Date(`${dateString}T00:00:00`));
+}
+
+function isValidAttendee(attendee: EventbriteAttendee) {
+  if (attendee.cancelled) return false;
+  if (attendee.refunded) return false;
+  if (attendee.status && attendee.status !== "Attending") return false;
+  return true;
+}
+
+function getAttendeeBasePrice(attendee: EventbriteAttendee) {
+  return Number(attendee.costs?.base_price?.major_value ?? 0);
+}
 
 export async function getEventbriteShowStatsBySlug(
   slug: string
@@ -53,41 +80,77 @@ export async function getEventbriteShowStatsBySlug(
     return null;
   }
 
-const response = await fetch(
-  `https://www.eventbriteapi.com/v3/events/${eventId}/attendees/`,
-  {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    cache: "no-store",
-  }
-  );
+  const attendees: EventbriteAttendee[] = [];
+  let page = 1;
+  let hasMoreItems = false;
 
-  if (!response.ok) {
-    console.error(
-      `Eventbrite API error for ${slug}:`,
-      response.status,
-      await response.text()
+  do {
+    const url = new URL(
+      `https://www.eventbriteapi.com/v3/events/${eventId}/attendees/`
     );
-    return null;
-  }
 
-  const data = (await response.json()) as EventbriteAttendeesResponse;
+    if (page > 1) {
+      url.searchParams.set("page", String(page));
+    }
 
-  const validAttendees = (data.attendees ?? []).filter((attendee) => {
-    if (attendee.cancelled) return false;
-    if (attendee.refunded) return false;
-    if (attendee.status && attendee.status !== "Attending") return false;
-    return true;
-  });
+    const response = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      console.error(
+        `Eventbrite API error for ${slug}:`,
+        response.status,
+        await response.text()
+      );
+      return null;
+    }
+
+    const data = (await response.json()) as EventbriteAttendeesResponse;
+
+    attendees.push(...(data.attendees ?? []));
+
+    hasMoreItems = data.pagination?.has_more_items ?? false;
+    page += 1;
+  } while (hasMoreItems);
+
+  const validAttendees = attendees.filter(isValidAttendee);
 
   const ticketRevenue = validAttendees.reduce((sum, attendee) => {
-    const basePrice = Number(attendee.costs?.base_price?.major_value ?? 0);
-    return sum + basePrice;
+    return sum + getAttendeeBasePrice(attendee);
   }, 0);
+
+  const dailySalesByDate = new Map<string, DailyTicketSalesPoint>();
+
+  validAttendees.forEach((attendee) => {
+    if (!attendee.created) return;
+
+    const date = attendee.created.slice(0, 10);
+    const basePrice = getAttendeeBasePrice(attendee);
+    const existing = dailySalesByDate.get(date);
+
+    if (existing) {
+      existing.ticketSales += 1;
+      existing.ticketRevenue += basePrice;
+      return;
+    }
+
+    dailySalesByDate.set(date, {
+      date,
+      label: formatDailySalesLabel(date),
+      ticketSales: 1,
+      ticketRevenue: basePrice,
+    });
+  });
 
   return {
     ticketSales: validAttendees.length,
     ticketRevenue,
+    dailyTicketSales: Array.from(dailySalesByDate.values()).sort((a, b) =>
+      a.date.localeCompare(b.date)
+    ),
   };
 }
