@@ -76,6 +76,187 @@ function formatChartDate(dateString: string) {
   }).format(new Date(`${dateString}T00:00:00`));
 }
 
+type WeeklyTicketSalesPoint = {
+  weekStart: string;
+  label: string;
+  weeklySales: number;
+  cumulativeSales: number;
+  weeklyRevenue: number;
+  cumulativeRevenue: number;
+};
+
+function formatWeekLabel(dateString: string) {
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+  }).format(new Date(`${dateString}T00:00:00`));
+}
+
+function getMondayWeekStart(dateString: string) {
+  const [year, month, day] = dateString.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const dayOfWeek = date.getUTCDay();
+  const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+
+  date.setUTCDate(date.getUTCDate() - daysSinceMonday);
+
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function buildWeeklyTicketSales(
+  dailyTicketSales: DailyTicketSalesPoint[]
+): WeeklyTicketSalesPoint[] {
+  const weeklySalesByStart = new Map<
+    string,
+    {
+      weeklySales: number;
+      weeklyRevenue: number;
+    }
+  >();
+
+  dailyTicketSales.forEach((point) => {
+    const weekStart = getMondayWeekStart(point.date);
+    const existing = weeklySalesByStart.get(weekStart) ?? {
+      weeklySales: 0,
+      weeklyRevenue: 0,
+    };
+
+    existing.weeklySales += point.ticketSales;
+    existing.weeklyRevenue += point.ticketRevenue;
+
+    weeklySalesByStart.set(weekStart, existing);
+  });
+
+  let cumulativeSales = 0;
+  let cumulativeRevenue = 0;
+
+  return Array.from(weeklySalesByStart.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([weekStart, value]) => {
+      cumulativeSales += value.weeklySales;
+      cumulativeRevenue += value.weeklyRevenue;
+
+      return {
+        weekStart,
+        label: formatWeekLabel(weekStart),
+        weeklySales: value.weeklySales,
+        cumulativeSales,
+        weeklyRevenue: value.weeklyRevenue,
+        cumulativeRevenue,
+      };
+    });
+}
+
+function WeeklySalesProgressCard({ show }: { show: TourShow }) {
+  const weeklySales = buildWeeklyTicketSales(show.dailyTicketSales);
+  const bestWeek = weeklySales.reduce(
+    (best, week) => Math.max(best, week.weeklySales),
+    0
+  );
+  const latestWeek = weeklySales[weeklySales.length - 1];
+
+  if (weeklySales.length === 0) {
+    return (
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
+        <h3 className="text-lg font-semibold text-white">
+          Weekly Sales Progress
+        </h3>
+        <div className="mt-4 rounded-2xl border border-dashed border-zinc-700 bg-zinc-950/50 p-6 text-sm text-zinc-500">
+          No weekly sales data yet. For Eventbrite shows this will populate from
+          attendee purchase dates. Nijmegen can stay manual until we add the
+          Monday update table.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-semibold text-white">
+            Weekly Sales Progress
+          </h3>
+          <p className="mt-1 text-sm text-zinc-400">
+            Monday-to-Sunday ticket movement for this show.
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-right">
+          <div className="text-xs uppercase tracking-[0.18em] text-zinc-500">
+            Latest Week
+          </div>
+          <div className="mt-1 text-xl font-semibold text-emerald-400">
+            +{latestWeek?.weeklySales ?? 0}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 space-y-3">
+        {weeklySales.map((week) => {
+          const width =
+            bestWeek === 0 ? 0 : Math.max((week.weeklySales / bestWeek) * 100, 4);
+
+          return (
+            <div key={week.weekStart} className="grid gap-2">
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <div className="font-medium text-zinc-200">{week.label}</div>
+                <div className="text-zinc-400">
+                  <span className="font-semibold text-emerald-400">
+                    +{week.weeklySales}
+                  </span>
+                  <span className="mx-2 text-zinc-600">/</span>
+                  <span>{week.cumulativeSales} total</span>
+                </div>
+              </div>
+
+              <div className="h-3 overflow-hidden rounded-full bg-zinc-950">
+                <div
+                  className="h-full rounded-full bg-emerald-400"
+                  style={{ width: `${width}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-5 overflow-hidden rounded-2xl border border-zinc-800">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-zinc-800/70 text-zinc-300">
+            <tr>
+              <th className="px-4 py-3 font-medium">Week</th>
+              <th className="px-4 py-3 text-right font-medium">UP</th>
+              <th className="px-4 py-3 text-right font-medium">Total Sold</th>
+              <th className="px-4 py-3 text-right font-medium">Revenue</th>
+            </tr>
+          </thead>
+          <tbody>
+            {weeklySales.map((week) => (
+              <tr key={week.weekStart} className="border-t border-zinc-800">
+                <td className="px-4 py-3 text-zinc-300">{week.label}</td>
+                <td className="px-4 py-3 text-right font-semibold text-emerald-400">
+                  +{week.weeklySales}
+                </td>
+                <td className="px-4 py-3 text-right text-zinc-300">
+                  {week.cumulativeSales}
+                </td>
+                <td className="px-4 py-3 text-right text-zinc-300">
+                  {money(week.weeklyRevenue)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function calculateCampaignTickets(show: TourShow) {
   return show.dailyTicketSales
     .filter((point) => point.date >= META_CPT_START_DATE)
@@ -579,14 +760,7 @@ export default function TourDashboardClient({
                                   ) : null}
                                 </div>
 
-                                <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
-                                  <h3 className="text-lg font-semibold text-white">
-                                    Ticket Sales Over Time
-                                  </h3>
-                                  <div className="mt-4 flex h-64 items-center justify-center rounded-2xl border border-dashed border-zinc-700 bg-zinc-950/50 text-sm text-zinc-500">
-                                    Placeholder for ticket sales graph
-                                  </div>
-                                </div>
+                                <WeeklySalesProgressCard show={show} />
                               </div>
 
                               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
