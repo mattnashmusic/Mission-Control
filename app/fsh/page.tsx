@@ -53,6 +53,7 @@ type ShippingRateEntry = {
 };
 
 const COST_LOGIC_CUTOVER_DATE = new Date("2026-06-13T00:00:00.000Z");
+const VINYL_COMBINED_SHIPPING_DATE = new Date("2026-05-06T00:00:00.000Z");
 
 const LEGACY_PRODUCT_COSTS = {
   cd1: 1.04,
