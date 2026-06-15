@@ -33,12 +33,10 @@ export async function POST() {
   try {
     const [shopifyOrdersResult, shopifyCustomersResult, metaResult] =
       await Promise.all([
-        timedStep("syncShopifyOrdersToDb", () => syncShopifyOrdersToDb(30)),
+        timedStep("syncShopifyOrdersToDb", () => syncShopifyOrdersToDb(2)),
         timedStep("syncShopifyCustomersToDb", () => syncShopifyCustomersToDb(2)),
         timedStep("syncMetaDailyToDb", () => syncMetaDailyToDb()),
       ]);
-
-    const syncLogStartedAt = Date.now();
 
     await prisma.syncLog.create({
       data: {
@@ -55,9 +53,6 @@ export async function POST() {
     });
 
     console.log(
-      `[SYNC PERF] prisma.syncLog.create(success): ${Date.now() - syncLogStartedAt}ms`
-    );
-    console.log(
       `[SYNC PERF] /api/sync/all POST total: ${Date.now() - requestStartedAt}ms`
     );
 
@@ -70,8 +65,6 @@ export async function POST() {
   } catch (error) {
     console.error("POST /api/sync/all failed:", error);
 
-    const syncLogStartedAt = Date.now();
-
     await prisma.syncLog.create({
       data: {
         domain: "sync-all",
@@ -82,13 +75,6 @@ export async function POST() {
         finishedAt: new Date(),
       },
     });
-
-    console.log(
-      `[SYNC PERF] prisma.syncLog.create(error): ${Date.now() - syncLogStartedAt}ms`
-    );
-    console.log(
-      `[SYNC PERF] /api/sync/all POST total before error response: ${Date.now() - requestStartedAt}ms`
-    );
 
     return NextResponse.json(
       {
