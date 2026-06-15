@@ -33,7 +33,7 @@ export async function POST() {
   try {
     const [shopifyOrdersResult, shopifyCustomersResult, metaResult] =
       await Promise.all([
-        timedStep("syncShopifyOrdersToDb", () => syncShopifyOrdersToDb(2)),
+        timedStep("syncShopifyOrdersToDb", () => syncShopifyOrdersToDb(30)),
         timedStep("syncShopifyCustomersToDb", () => syncShopifyCustomersToDb(2)),
         timedStep("syncMetaDailyToDb", () => syncMetaDailyToDb()),
       ]);
