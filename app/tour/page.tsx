@@ -2,7 +2,9 @@ import TourDashboardClient, {
   type TourShow,
 } from "@/components/tour/TourDashboardClient";
 import { getEventbriteShowStatsBySlug } from "@/lib/eventbrite";
+import { getTourMetaSnapshot } from "@/lib/meta-tour";
 import { prisma } from "@/lib/prisma";
+import { TOUR_META_CAMPAIGN_IDS_BY_SLUG } from "@/lib/tour-show-meta-campaigns";
 
 export default async function TourPage() {
   const [shows, settings] = await Promise.all([
@@ -18,6 +20,19 @@ export default async function TourPage() {
     shows.map(async (show: (typeof shows)[number]) => {
       const eventbriteStats = await getEventbriteShowStatsBySlug(show.slug);
 
+      const metaCampaignId = TOUR_META_CAMPAIGN_IDS_BY_SLUG[show.slug];
+
+      let liveMetaSpend = show.metaSpend;
+
+      if (metaCampaignId) {
+        try {
+          const metaSnapshot = await getTourMetaSnapshot(metaCampaignId);
+          liveMetaSpend = metaSnapshot.spend.lifetime;
+        } catch (error) {
+          console.error(`Failed to load Meta spend for ${show.slug}:`, error);
+        }
+      }
+
       return {
         id: show.id,
         slug: show.slug,
@@ -31,7 +46,7 @@ export default async function TourPage() {
         ticketRevenue:
           eventbriteStats?.ticketRevenue ?? show.ticketSales * show.ticketPrice,
         dailyTicketSales: eventbriteStats?.dailyTicketSales ?? [],
-        metaSpend: show.metaSpend,
+        metaSpend: liveMetaSpend,
         notes: show.notes,
         costs: {
           venueHire: show.venueHire,
