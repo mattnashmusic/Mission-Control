@@ -383,10 +383,6 @@ function calculateShipping(
   shippingEntries: ShippingRateEntry[] = [],
 ) {
   return orders.reduce((sum, order) => {
-    if (!isUsingNewCostLogic(order)) {
-      return sum + calculateShippingCost(order.country, order.products);
-    }
-
     return sum + calculateNewOrderShipping(order, shippingEntries);
   }, 0);
 }
