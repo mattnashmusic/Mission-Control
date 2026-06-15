@@ -7,6 +7,8 @@ import {
   type EditableTourSettingField,
 } from "@/lib/tour-settings-client";
 
+const META_CPT_START_DATE = "2026-06-15";
+
 export type DailyTicketSalesPoint = {
   date: string;
   label: string;
@@ -74,6 +76,12 @@ function formatChartDate(dateString: string) {
   }).format(new Date(`${dateString}T00:00:00`));
 }
 
+function calculateCampaignTickets(show: TourShow) {
+  return show.dailyTicketSales
+    .filter((point) => point.date >= META_CPT_START_DATE)
+    .reduce((sum, point) => sum + point.ticketSales, 0);
+}
+
 function calculateShowTotalCost(show: TourShow) {
   return (
     show.costs.venueHire +
@@ -110,8 +118,11 @@ function calculatePercentSold(show: TourShow) {
 }
 
 function calculateCostPerTicket(show: TourShow) {
-  if (show.ticketSales === 0) return 0;
-  return show.metaSpend / show.ticketSales;
+  const campaignTickets = calculateCampaignTickets(show);
+
+  if (campaignTickets === 0) return 0;
+
+  return show.metaSpend / campaignTickets;
 }
 
 function KpiCard({
@@ -235,6 +246,10 @@ export default function TourDashboardClient({
   const kpis = useMemo(() => {
     const upcomingShows = shows.length;
     const ticketsSoldTotal = shows.reduce((sum, show) => sum + show.ticketSales, 0);
+    const campaignTicketsTotal = shows.reduce(
+      (sum, show) => sum + calculateCampaignTickets(show),
+      0
+    );
     const totalCapacity = shows.reduce((sum, show) => sum + show.capacity, 0);
     const adSpendTotal = shows.reduce((sum, show) => sum + show.metaSpend, 0);
     const totalRevenue = shows.reduce(
@@ -244,7 +259,7 @@ export default function TourDashboardClient({
     const percentTourSold =
       totalCapacity === 0 ? 0 : (ticketsSoldTotal / totalCapacity) * 100;
     const costPerTicket =
-      ticketsSoldTotal === 0 ? 0 : adSpendTotal / ticketsSoldTotal;
+      campaignTicketsTotal === 0 ? 0 : adSpendTotal / campaignTicketsTotal;
 
     const totalTourBaseCosts = shows.reduce(
       (sum, show) => sum + calculateShowBaseCostExcludingAds(show),
@@ -269,6 +284,7 @@ export default function TourDashboardClient({
     return {
       upcomingShows,
       ticketsSoldTotal,
+      campaignTicketsTotal,
       adSpendTotal,
       totalRevenue,
       percentTourSold,
@@ -427,7 +443,7 @@ export default function TourDashboardClient({
           <KpiCard title="📣 Ad Spend" value={money(kpis.adSpendTotal)} />
           <KpiCard
             title="💸 Cost Per Ticket"
-            value={kpis.ticketsSoldTotal === 0 ? "—" : money(kpis.costPerTicket)}
+            value={kpis.campaignTicketsTotal === 0 ? "—" : money(kpis.costPerTicket)}
           />
         </section>
 
@@ -453,7 +469,7 @@ export default function TourDashboardClient({
                   <th className="px-4 py-3 text-right font-medium">Capacity</th>
                   <th className="px-4 py-3 text-right font-medium">% Sold</th>
                   <th className="px-4 py-3 text-right font-medium">Ad Spend</th>
-                  <th className="px-4 py-3 text-right font-medium">Cost / Ticket</th>
+                  <th className="px-4 py-3 text-right font-medium">Cost / Ticket 15 Jun+</th>
                 </tr>
               </thead>
 
@@ -461,6 +477,7 @@ export default function TourDashboardClient({
                 {shows.map((show) => {
                   const isExpanded = expandedShowId === show.id;
                   const percentSold = calculatePercentSold(show);
+                  const campaignTickets = calculateCampaignTickets(show);
                   const costPerTicket = calculateCostPerTicket(show);
                   const totalCost = calculateShowTotalCost(show);
                   const breakEvenTickets = calculateBreakEvenTickets(show);
@@ -488,7 +505,7 @@ export default function TourDashboardClient({
                         <td className="px-4 py-4 text-right">{percent(percentSold)}</td>
                         <td className="px-4 py-4 text-right">{money(show.metaSpend)}</td>
                         <td className="px-4 py-4 text-right">
-                          {show.ticketSales === 0 ? "—" : money(costPerTicket)}
+                          {campaignTickets === 0 ? "—" : money(costPerTicket)}
                         </td>
                       </tr>
 
@@ -502,13 +519,22 @@ export default function TourDashboardClient({
                                     Show Snapshot
                                   </h3>
 
-                                  <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                                  <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                                     <div>
                                       <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                                         Tickets Sold
                                       </div>
                                       <div className="mt-2 text-2xl font-semibold text-white">
                                         {show.ticketSales}
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                        Tickets 15 Jun+
+                                      </div>
+                                      <div className="mt-2 text-2xl font-semibold text-white">
+                                        {campaignTickets}
                                       </div>
                                     </div>
 
@@ -762,6 +788,20 @@ export default function TourDashboardClient({
                                         {percent(percentSold)}
                                       </span>
                                     </div>
+
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-sm text-zinc-400">Tickets 15 Jun+</span>
+                                      <span className="text-sm font-medium text-white">
+                                        {campaignTickets}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-sm text-zinc-400">CPT 15 Jun+</span>
+                                      <span className="text-sm font-medium text-white">
+                                        {campaignTickets === 0 ? "—" : money(costPerTicket)}
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
@@ -776,6 +816,7 @@ export default function TourDashboardClient({
             </table>
           </div>
         </section>
+
         <section className="mt-8 rounded-3xl border border-zinc-800 bg-zinc-900/90 p-5">
           <div className="flex items-center justify-between gap-4">
             <div>
@@ -796,74 +837,74 @@ export default function TourDashboardClient({
 
           {tourEconomicsOpen ? (
             <div className="mt-5">
-            <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <label className="grid gap-2 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
-                <span className="text-sm text-zinc-400">Planned Ad Budget</span>
-                <input
-                  type="number"
-                  value={plannedAdBudget}
-                  onChange={(e) => setPlannedAdBudget(Number(e.target.value) || 0)}
-                  onBlur={(e) =>
-                    persistSetting(
-                      "plannedAdBudget",
-                      Number(e.target.value) || 0
-                    )
-                  }
-                  className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
-                />
-                {renderSettingSaveStatus("plannedAdBudget")}
-              </label>
-  
-              <label className="grid gap-2 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
-                <span className="text-sm text-zinc-400">Blended CPT</span>
-                <input
-                  type="number"
-                  value={blendedCpt}
-                  onChange={(e) => setBlendedCpt(Number(e.target.value) || 0)}
-                  onBlur={(e) =>
-                    persistSetting(
-                      "blendedCpt",
-                      Number(e.target.value) || 0
-                    )
-                  }
-                  className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
-                />
-                {renderSettingSaveStatus("blendedCpt")}
-              </label>
-  
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
-                <div className="text-sm text-zinc-400">Weighted Avg Ticket Price</div>
-                <div className="mt-2 text-2xl font-semibold text-white">
-                  {money(kpis.weightedAverageTicketPrice)}
+              <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <label className="grid gap-2 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
+                  <span className="text-sm text-zinc-400">Planned Ad Budget</span>
+                  <input
+                    type="number"
+                    value={plannedAdBudget}
+                    onChange={(e) => setPlannedAdBudget(Number(e.target.value) || 0)}
+                    onBlur={(e) =>
+                      persistSetting(
+                        "plannedAdBudget",
+                        Number(e.target.value) || 0
+                      )
+                    }
+                    className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
+                  />
+                  {renderSettingSaveStatus("plannedAdBudget")}
+                </label>
+
+                <label className="grid gap-2 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
+                  <span className="text-sm text-zinc-400">Blended CPT</span>
+                  <input
+                    type="number"
+                    value={blendedCpt}
+                    onChange={(e) => setBlendedCpt(Number(e.target.value) || 0)}
+                    onBlur={(e) =>
+                      persistSetting(
+                        "blendedCpt",
+                        Number(e.target.value) || 0
+                      )
+                    }
+                    className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
+                  />
+                  {renderSettingSaveStatus("blendedCpt")}
+                </label>
+
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
+                  <div className="text-sm text-zinc-400">Weighted Avg Ticket Price</div>
+                  <div className="mt-2 text-2xl font-semibold text-white">
+                    {money(kpis.weightedAverageTicketPrice)}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
+                  <div className="text-sm text-zinc-400">Base Tour Costs</div>
+                  <div className="mt-2 text-2xl font-semibold text-white">
+                    {money(kpis.totalTourBaseCosts)}
+                  </div>
                 </div>
               </div>
-  
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
-                <div className="text-sm text-zinc-400">Base Tour Costs</div>
-                <div className="mt-2 text-2xl font-semibold text-white">
-                  {money(kpis.totalTourBaseCosts)}
-                </div>
+
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <KpiCard title="Total Tour Costs" value={money(kpis.totalTourCosts)} />
+                <KpiCard
+                  title="Forecast Tickets Sold"
+                  value={kpis.forecastTicketsSold.toFixed(0)}
+                />
+                <KpiCard
+                  title="Expected Revenue"
+                  value={money(kpis.expectedRevenue)}
+                />
+                <KpiCard
+                  title="Forecast Profit"
+                  value={signedMoney(kpis.forecastProfit)}
+                  valueClassName={
+                    kpis.forecastProfit >= 0 ? "text-emerald-400" : "text-rose-400"
+                  }
+                />
               </div>
-            </div>
-  
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <KpiCard title="Total Tour Costs" value={money(kpis.totalTourCosts)} />
-              <KpiCard
-                title="Forecast Tickets Sold"
-                value={kpis.forecastTicketsSold.toFixed(0)}
-              />
-              <KpiCard
-                title="Expected Revenue"
-                value={money(kpis.expectedRevenue)}
-              />
-              <KpiCard
-                title="Forecast Profit"
-                value={signedMoney(kpis.forecastProfit)}
-                valueClassName={
-                  kpis.forecastProfit >= 0 ? "text-emerald-400" : "text-rose-400"
-                }
-              />
-            </div>
             </div>
           ) : null}
         </section>
