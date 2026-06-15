@@ -6,5 +6,5 @@ export const TOUR_META_CAMPAIGN_IDS_BY_SLUG: Record<string, string> = {
   "cologne-2026": "120246266127070724",
   "brussels-2026": "120246266391840724",
   "nijmegen-2026": "120246266509220724",
-  "amsterdam-2026": "120246196697610724",
+  "amsterdam-2026": "120246266571770724",
 };
