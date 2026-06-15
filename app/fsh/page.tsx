@@ -37,6 +37,32 @@ type PurchasesSnapshot = {
   lifetime: number;
 };
 
+type CogsRateEntry = {
+  itemKey: string;
+  unitCost: number;
+  effectiveFrom: Date;
+};
+
+type ShippingRateEntry = {
+  countryCode: string;
+  cd1OnlyCost: number | null;
+  cdPackageCost: number;
+  vinylCost: number;
+  vinylIncludesCds: boolean;
+  effectiveFrom: Date;
+};
+
+const COST_LOGIC_CUTOVER_DATE = new Date("2026-06-13T00:00:00.000Z");
+
+const LEGACY_PRODUCT_COSTS = {
+  cd1: 1.04,
+  cd2: 2.2,
+  vinyl: 6.5,
+  cd_envelope: 0,
+  vinyl_box: 0,
+  printer_label: 0,
+};
+
 const PRODUCT_MATCHES = {
   cd2: ["rebirth cd deluxe"],
   vinyl: ["rebirth vinyl"],
@@ -124,33 +150,33 @@ function shiftDateKey(date: Date, days: number) {
 
 function filterOrdersByDateKeys(
   orders: DashboardOrder[],
-  dateKeys: Set<string>
+  dateKeys: Set<string>,
 ) {
   return orders.filter((order) => dateKeys.has(getDateKey(order.createdAt)));
 }
 
 function filterCustomersByDateKeys(
   customers: DashboardCustomer[],
-  dateKeys: Set<string>
+  dateKeys: Set<string>,
 ) {
   return customers.filter(
     (customer) =>
       customer.email.trim() !== "" &&
-      dateKeys.has(getDateKey(customer.createdAt))
+      dateKeys.has(getDateKey(customer.createdAt)),
   );
 }
 
-function filterCustomersSince(
-  customers: DashboardCustomer[],
-  startDate: Date
-) {
+function filterCustomersSince(customers: DashboardCustomer[], startDate: Date) {
   return customers.filter((customer) => {
     if (customer.email.trim() === "") return false;
     return new Date(customer.createdAt) >= startDate;
   });
 }
 
-function filterMetaByDateKeys(rows: HistoricalMetaRow[], dateKeys: Set<string>) {
+function filterMetaByDateKeys(
+  rows: HistoricalMetaRow[],
+  dateKeys: Set<string>,
+) {
   return rows.filter((row) => dateKeys.has(getDateKey(row.date)));
 }
 
@@ -175,15 +201,192 @@ function calculateAov(orders: DashboardOrder[]) {
   return calculateRevenue(orders) / orders.length;
 }
 
-function calculateShipping(orders: DashboardOrder[]) {
+function isUsingNewCostLogic(order: DashboardOrder) {
+  return new Date(order.createdAt) >= COST_LOGIC_CUTOVER_DATE;
+}
+
+function parseProductItems(productsSummary: string) {
+  if (!productsSummary) return [];
+
+  return productsSummary
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const match = item.match(/(.+?) x(\d+)$/i);
+
+      return {
+        productName: match ? match[1].trim() : item,
+        quantity: match ? Number(match[2]) : 1,
+      };
+    });
+}
+
+function getProductItemKey(productName: string) {
+  const name = normalizeText(productName);
+
+  if (
+    name.includes("rebirth cd deluxe") ||
+    name.includes("cd deluxe") ||
+    name.includes("deluxe cd")
+  ) {
+    return "cd2";
+  }
+
+  if (name.includes("rebirth vinyl") || name.includes("vinyl")) {
+    return "vinyl";
+  }
+
+  if (name.includes("rebirth cd") || name.includes("cd")) {
+    return "cd1";
+  }
+
+  return null;
+}
+
+function getLatestCogsRate(
+  entries: CogsRateEntry[],
+  itemKey: string,
+  orderDate: Date,
+) {
+  const matchingEntry = entries.find(
+    (entry) => entry.itemKey === itemKey && entry.effectiveFrom <= orderDate,
+  );
+
+  if (matchingEntry) return matchingEntry.unitCost;
+
+  return (
+    LEGACY_PRODUCT_COSTS[itemKey as keyof typeof LEGACY_PRODUCT_COSTS] ?? 0
+  );
+}
+
+function calculateNewOrderCogs(
+  order: DashboardOrder,
+  cogsEntries: CogsRateEntry[],
+) {
+  const orderDate = new Date(order.createdAt);
+  const items = parseProductItems(order.products);
+
+  let productCost = 0;
+  let cdUnits = 0;
+  let hasVinyl = false;
+
+  for (const item of items) {
+    const itemKey = getProductItemKey(item.productName);
+    if (!itemKey) continue;
+
+    productCost +=
+      getLatestCogsRate(cogsEntries, itemKey, orderDate) * item.quantity;
+
+    if (itemKey === "cd1" || itemKey === "cd2") {
+      cdUnits += item.quantity;
+    }
+
+    if (itemKey === "vinyl") {
+      hasVinyl = true;
+    }
+  }
+
+  const hasPhysicalProduct = cdUnits > 0 || hasVinyl;
+  const packagingCost =
+    (hasPhysicalProduct
+      ? getLatestCogsRate(cogsEntries, "printer_label", orderDate)
+      : 0) +
+    (hasVinyl
+      ? getLatestCogsRate(cogsEntries, "vinyl_box", orderDate)
+      : cdUnits > 0
+        ? getLatestCogsRate(cogsEntries, "cd_envelope", orderDate)
+        : 0);
+
+  return productCost + packagingCost;
+}
+
+function calculateCogs(
+  orders: DashboardOrder[],
+  cogsEntries: CogsRateEntry[] = [],
+) {
   return orders.reduce((sum, order) => {
-    return sum + calculateShippingCost(order.country, order.products);
+    if (!isUsingNewCostLogic(order)) {
+      return sum + getProductCost(order.products);
+    }
+
+    return sum + calculateNewOrderCogs(order, cogsEntries);
   }, 0);
 }
 
-function calculateCogs(orders: DashboardOrder[]) {
+function getLatestShippingRate(
+  entries: ShippingRateEntry[],
+  countryCode: string,
+  orderDate: Date,
+) {
+  const normalizedCountryCode = countryCode.trim().toUpperCase();
+
+  return entries.find(
+    (entry) =>
+      entry.countryCode.toUpperCase() === normalizedCountryCode &&
+      entry.effectiveFrom <= orderDate,
+  );
+}
+
+function calculateNewOrderShipping(
+  order: DashboardOrder,
+  shippingEntries: ShippingRateEntry[],
+) {
+  const orderDate = new Date(order.createdAt);
+  const shippingRate = getLatestShippingRate(
+    shippingEntries,
+    order.country,
+    orderDate,
+  );
+
+  if (!shippingRate) {
+    return calculateShippingCost(order.country, order.products);
+  }
+
+  const items = parseProductItems(order.products);
+  let cdUnits = 0;
+  let hasVinyl = false;
+
+  for (const item of items) {
+    const itemKey = getProductItemKey(item.productName);
+
+    if (itemKey === "cd1" || itemKey === "cd2") {
+      cdUnits += item.quantity;
+    }
+
+    if (itemKey === "vinyl") {
+      hasVinyl = true;
+    }
+  }
+
+  if (hasVinyl) {
+    return shippingRate.vinylIncludesCds
+      ? shippingRate.vinylCost
+      : shippingRate.vinylCost +
+          (cdUnits === 1 && shippingRate.cd1OnlyCost !== null
+            ? shippingRate.cd1OnlyCost
+            : shippingRate.cdPackageCost);
+  }
+
+  if (cdUnits === 0) return 0;
+
+  if (cdUnits === 1 && shippingRate.cd1OnlyCost !== null) {
+    return shippingRate.cd1OnlyCost;
+  }
+
+  return shippingRate.cdPackageCost;
+}
+
+function calculateShipping(
+  orders: DashboardOrder[],
+  shippingEntries: ShippingRateEntry[] = [],
+) {
   return orders.reduce((sum, order) => {
-    return sum + getProductCost(order.products);
+    if (!isUsingNewCostLogic(order)) {
+      return sum + calculateShippingCost(order.country, order.products);
+    }
+
+    return sum + calculateNewOrderShipping(order, shippingEntries);
   }, 0);
 }
 
@@ -195,10 +398,15 @@ function calculateProcessingFees(orders: DashboardOrder[]) {
   }, 0);
 }
 
-function calculateNetProfit(orders: DashboardOrder[], metaSpend: number) {
+function calculateNetProfit(
+  orders: DashboardOrder[],
+  metaSpend: number,
+  cogsEntries: CogsRateEntry[] = [],
+  shippingEntries: ShippingRateEntry[] = [],
+) {
   const revenue = calculateRevenue(orders);
-  const shipping = calculateShipping(orders);
-  const cogs = calculateCogs(orders);
+  const shipping = calculateShipping(orders, shippingEntries);
+  const cogs = calculateCogs(orders, cogsEntries);
   const processingFees = calculateProcessingFees(orders);
 
   return revenue - shipping - cogs - processingFees - metaSpend;
@@ -231,7 +439,7 @@ function orderHasAnyProductMatch(order: DashboardOrder, matches: string[]) {
 
 function countOrdersWithAnyProductMatch(
   orders: DashboardOrder[],
-  matches: string[]
+  matches: string[],
 ) {
   return orders.filter((order) => orderHasAnyProductMatch(order, matches))
     .length;
@@ -273,10 +481,9 @@ function calculatePsm(
   productCosts: number,
   fulfillmentCosts: number,
   processingFees: number,
-  adCosts: number
+  adCosts: number,
 ) {
-  const totalCosts =
-    productCosts + fulfillmentCosts + processingFees + adCosts;
+  const totalCosts = productCosts + fulfillmentCosts + processingFees + adCosts;
 
   if (totalCosts === 0) return 0;
   return revenue / totalCosts;
@@ -314,8 +521,8 @@ function daysBetweenInclusive(start: Date, end: Date) {
   return Math.max(
     1,
     Math.floor(
-      (startOfDay(end).getTime() - startOfDay(start).getTime()) / msPerDay
-    ) + 1
+      (startOfDay(end).getTime() - startOfDay(start).getTime()) / msPerDay,
+    ) + 1,
   );
 }
 
@@ -344,7 +551,7 @@ function mapDbOrder(order: {
     country: order.customerCountryCode || order.customerCountry || "—",
     products: order.lineItems
       .flatMap((item) =>
-        Array.from({ length: Math.max(1, item.quantity) }, () => item.title)
+        Array.from({ length: Math.max(1, item.quantity) }, () => item.title),
       )
       .join(", "),
     revenueAmount: order.totalPrice,
@@ -377,8 +584,7 @@ function mapDbCustomer(customer: {
 
 function sortOrdersNewestFirst(orders: DashboardOrder[]) {
   return [...orders].sort(
-    (a, b) =>
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
 }
 
@@ -398,22 +604,22 @@ function resolveLiveMeta(meta: unknown) {
     typeof value?.spend?.today === "number"
       ? value.spend.today
       : typeof value?.todaySpend === "number"
-      ? value.todaySpend
-      : 0;
+        ? value.todaySpend
+        : 0;
 
   const dailyBudget =
     typeof value?.dailyBudget === "number"
       ? value.dailyBudget
       : typeof value?.budget === "number"
-      ? value.budget
-      : null;
+        ? value.budget
+        : null;
 
   const salesTrackedToday =
     typeof value?.salesTrackedToday === "number"
       ? value.salesTrackedToday
       : typeof value?.trackedConversions === "number"
-      ? value.trackedConversions
-      : 0;
+        ? value.trackedConversions
+        : 0;
 
   return {
     spendToday,
@@ -544,7 +750,9 @@ function BottomStatCard({
       <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
         {label}
       </p>
-      <p className={`mt-4 text-2xl font-semibold tabular-nums ${valueClassName}`}>
+      <p
+        className={`mt-4 text-2xl font-semibold tabular-nums ${valueClassName}`}
+      >
         {value}
       </p>
     </div>
@@ -556,6 +764,8 @@ export default async function Home() {
   let todayLiveOrders: DashboardOrder[] = [];
   let customers: DashboardCustomer[] = [];
   let historicalMetaRows: HistoricalMetaRow[] = [];
+  let cogsRateEntries: CogsRateEntry[] = [];
+  let shippingRateEntries: ShippingRateEntry[] = [];
 
   let shopifyError = "";
   let customerError = "";
@@ -587,6 +797,8 @@ export default async function Home() {
     dbOrdersResult,
     dbCustomersResult,
     dbMetaResult,
+    cogsRatesResult,
+    shippingRatesResult,
     liveOrdersResult,
     liveMetaResult,
   ] = await Promise.allSettled([
@@ -601,24 +813,24 @@ export default async function Home() {
         finishedAt: "desc",
       },
     }),
-   prisma.shopifyOrder.findMany({
-  where: {
-    orderNumber: {
-      not: null,
-    },
-  },
-  include: {
-    lineItems: {
-      select: {
-        title: true,
-        quantity: true,
+    prisma.shopifyOrder.findMany({
+      where: {
+        orderNumber: {
+          not: null,
+        },
       },
-    },
-  },
-  orderBy: {
-    createdAt: "desc",
-  },
-}),
+      include: {
+        lineItems: {
+          select: {
+            title: true,
+            quantity: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    }),
     prisma.shopifyCustomer.findMany({
       select: {
         id: true,
@@ -641,12 +853,30 @@ export default async function Home() {
         date: "desc",
       },
     }),
+    prisma.cogsCostEntry.findMany({
+      select: {
+        itemKey: true,
+        unitCost: true,
+        effectiveFrom: true,
+      },
+      orderBy: [{ itemKey: "asc" }, { effectiveFrom: "desc" }],
+    }),
+    prisma.shippingCostEntry.findMany({
+      select: {
+        countryCode: true,
+        cd1OnlyCost: true,
+        cdPackageCost: true,
+        vinylCost: true,
+        vinylIncludesCds: true,
+        effectiveFrom: true,
+      },
+      orderBy: [{ countryCode: "asc" }, { effectiveFrom: "desc" }],
+    }),
     getTodayShopifyOrders(),
     getMetaSnapshot(),
   ]);
 
-  const lastSyncValue =
-    lastSync.status === "fulfilled" ? lastSync.value : null;
+  const lastSyncValue = lastSync.status === "fulfilled" ? lastSync.value : null;
 
   if (dbOrdersResult.status === "fulfilled") {
     historicalOrders = dbOrdersResult.value
@@ -671,7 +901,7 @@ export default async function Home() {
 
   if (dbMetaResult.status === "fulfilled") {
     historicalMetaRows = dbMetaResult.value.filter(
-      (row) => getDateKey(row.date) !== todayKey
+      (row) => getDateKey(row.date) !== todayKey,
     );
   } else {
     metaError =
@@ -681,11 +911,19 @@ export default async function Home() {
     historicalMetaRows = [];
   }
 
+  if (cogsRatesResult.status === "fulfilled") {
+    cogsRateEntries = cogsRatesResult.value;
+  }
+
+  if (shippingRatesResult.status === "fulfilled") {
+    shippingRateEntries = shippingRatesResult.value;
+  }
+
   if (liveOrdersResult.status === "fulfilled") {
     todayLiveOrders = sortOrdersNewestFirst(
       liveOrdersResult.value.filter(
-        (order) => getDateKey(order.createdAt) === todayKey
-      )
+        (order) => getDateKey(order.createdAt) === todayKey,
+      ),
     );
   } else {
     shopifyError =
@@ -713,15 +951,15 @@ export default async function Home() {
 
   const yesterdayOrders = filterOrdersByDateKeys(
     historicalOrders,
-    new Set([yesterdayKey])
+    new Set([yesterdayKey]),
   );
   const previous6DayOrders = filterOrdersByDateKeys(
     historicalOrders,
-    previous6DayKeys
+    previous6DayKeys,
   );
   const previous29DayOrders = filterOrdersByDateKeys(
     historicalOrders,
-    previous29DayKeys
+    previous29DayKeys,
   );
 
   const todayOrders = todayLiveOrders;
@@ -731,15 +969,15 @@ export default async function Home() {
 
   const yesterdayMetaRows = filterMetaByDateKeys(
     historicalMetaRows,
-    new Set([yesterdayKey])
+    new Set([yesterdayKey]),
   );
   const previous6DayMetaRows = filterMetaByDateKeys(
     historicalMetaRows,
-    previous6DayKeys
+    previous6DayKeys,
   );
   const previous29DayMetaRows = filterMetaByDateKeys(
     historicalMetaRows,
-    previous29DayKeys
+    previous29DayKeys,
   );
 
   metaSpend.yesterday = sumMetaSpend(yesterdayMetaRows);
@@ -780,19 +1018,19 @@ export default async function Home() {
   };
 
   const shippingValues = {
-    today: calculateShipping(todayOrders),
-    yesterday: calculateShipping(yesterdayOrders),
-    sevenDay: calculateShipping(sevenDayOrders),
-    thirtyDay: calculateShipping(thirtyDayOrders),
-    lifetime: calculateShipping(lifetimeOrders),
+    today: calculateShipping(todayOrders, shippingRateEntries),
+    yesterday: calculateShipping(yesterdayOrders, shippingRateEntries),
+    sevenDay: calculateShipping(sevenDayOrders, shippingRateEntries),
+    thirtyDay: calculateShipping(thirtyDayOrders, shippingRateEntries),
+    lifetime: calculateShipping(lifetimeOrders, shippingRateEntries),
   };
 
   const cogsValues = {
-    today: calculateCogs(todayOrders),
-    yesterday: calculateCogs(yesterdayOrders),
-    sevenDay: calculateCogs(sevenDayOrders),
-    thirtyDay: calculateCogs(thirtyDayOrders),
-    lifetime: calculateCogs(lifetimeOrders),
+    today: calculateCogs(todayOrders, cogsRateEntries),
+    yesterday: calculateCogs(yesterdayOrders, cogsRateEntries),
+    sevenDay: calculateCogs(sevenDayOrders, cogsRateEntries),
+    thirtyDay: calculateCogs(thirtyDayOrders, cogsRateEntries),
+    lifetime: calculateCogs(lifetimeOrders, cogsRateEntries),
   };
 
   const processingFeeValues = {
@@ -812,40 +1050,65 @@ export default async function Home() {
   };
 
   const netProfitValues = {
-    today: calculateNetProfit(todayOrders, metaSpend.today),
-    yesterday: calculateNetProfit(yesterdayOrders, metaSpend.yesterday),
-    sevenDay: calculateNetProfit(sevenDayOrders, metaSpend.sevenDay),
-    thirtyDay: calculateNetProfit(thirtyDayOrders, metaSpend.thirtyDay),
-    lifetime: calculateNetProfit(lifetimeOrders, metaSpend.lifetime),
+    today: calculateNetProfit(
+      todayOrders,
+      metaSpend.today,
+      cogsRateEntries,
+      shippingRateEntries,
+    ),
+    yesterday: calculateNetProfit(
+      yesterdayOrders,
+      metaSpend.yesterday,
+      cogsRateEntries,
+      shippingRateEntries,
+    ),
+    sevenDay: calculateNetProfit(
+      sevenDayOrders,
+      metaSpend.sevenDay,
+      cogsRateEntries,
+      shippingRateEntries,
+    ),
+    thirtyDay: calculateNetProfit(
+      thirtyDayOrders,
+      metaSpend.thirtyDay,
+      cogsRateEntries,
+      shippingRateEntries,
+    ),
+    lifetime: calculateNetProfit(
+      lifetimeOrders,
+      metaSpend.lifetime,
+      cogsRateEntries,
+      shippingRateEntries,
+    ),
   };
 
   const revenueVsYesterday = calculatePreviousPeriodChange(
     revenueValues.today,
-    revenueValues.yesterday
+    revenueValues.yesterday,
   );
 
   const todayCd2Count = countOrdersWithAnyProductMatch(
     todayOrders,
-    PRODUCT_MATCHES.cd2
+    PRODUCT_MATCHES.cd2,
   );
   const todayCd2TakeRate = calculateTakeRate(todayCd2Count, orderValues.today);
 
   const todayVinylCount = countOrdersWithAnyProductMatch(
     todayOrders,
-    PRODUCT_MATCHES.vinyl
+    PRODUCT_MATCHES.vinyl,
   );
   const todayVinylTakeRate = calculateTakeRate(
     todayVinylCount,
-    orderValues.today
+    orderValues.today,
   );
 
   const todayTipsCount = countOrdersWithAnyProductMatch(
     todayOrders,
-    PRODUCT_MATCHES.tips
+    PRODUCT_MATCHES.tips,
   );
   const todayTipsTakeRate = calculateTakeRate(
     todayTipsCount,
-    orderValues.today
+    orderValues.today,
   );
 
   const totalProductsValues = {
@@ -860,17 +1123,17 @@ export default async function Home() {
 
   const spendUsageToday = calculateSpendUsagePercent(
     metaSpend.today,
-    metaDailyBudget
+    metaDailyBudget,
   );
 
   const aovVsSevenDay = calculatePreviousPeriodChange(
     aovValues.today,
-    aovValues.sevenDay
+    aovValues.sevenDay,
   );
 
   const netProfitMarginToday = calculateMargin(
     revenueValues.today,
-    netProfitValues.today
+    netProfitValues.today,
   );
 
   const psmValues = {
@@ -879,35 +1142,35 @@ export default async function Home() {
       cogsValues.today,
       shippingValues.today,
       processingFeeValues.today,
-      metaSpend.today
+      metaSpend.today,
     ),
     yesterday: calculatePsm(
       revenueValues.yesterday,
       cogsValues.yesterday,
       shippingValues.yesterday,
       processingFeeValues.yesterday,
-      metaSpend.yesterday
+      metaSpend.yesterday,
     ),
     sevenDay: calculatePsm(
       revenueValues.sevenDay,
       cogsValues.sevenDay,
       shippingValues.sevenDay,
       processingFeeValues.sevenDay,
-      metaSpend.sevenDay
+      metaSpend.sevenDay,
     ),
     thirtyDay: calculatePsm(
       revenueValues.thirtyDay,
       cogsValues.thirtyDay,
       shippingValues.thirtyDay,
       processingFeeValues.thirtyDay,
-      metaSpend.thirtyDay
+      metaSpend.thirtyDay,
     ),
     lifetime: calculatePsm(
       revenueValues.lifetime,
       cogsValues.lifetime,
       shippingValues.lifetime,
       processingFeeValues.lifetime,
-      metaSpend.lifetime
+      metaSpend.lifetime,
     ),
   };
 
@@ -917,7 +1180,8 @@ export default async function Home() {
   const daysRunning = daysBetweenInclusive(fshStartDate, new Date());
 
   const emailValues = {
-    today: filterCustomersByDateKeys(customers, buildRecentDateKeySet(1)).length,
+    today: filterCustomersByDateKeys(customers, buildRecentDateKeySet(1))
+      .length,
     thirtyDay: filterCustomersByDateKeys(customers, buildRecentDateKeySet(30))
       .length,
     total: filterCustomersSince(customers, fshStartDate).length,
@@ -925,25 +1189,25 @@ export default async function Home() {
 
   const lifetimeCd2Count = countOrdersWithAnyProductMatch(
     lifetimeOrders,
-    PRODUCT_MATCHES.cd2
+    PRODUCT_MATCHES.cd2,
   );
   const lifetimeCd2TakeRate = calculateTakeRate(
     lifetimeCd2Count,
-    orderValues.lifetime
+    orderValues.lifetime,
   );
 
   const lifetimeVinylCount = countOrdersWithAnyProductMatch(
     lifetimeOrders,
-    PRODUCT_MATCHES.vinyl
+    PRODUCT_MATCHES.vinyl,
   );
   const lifetimeVinylTakeRate = calculateTakeRate(
     lifetimeVinylCount,
-    orderValues.lifetime
+    orderValues.lifetime,
   );
 
   const recentOrders = [...todayLiveOrders, ...historicalOrders].slice(0, 10);
   const firstNonTodayRecentOrderIndex = recentOrders.findIndex(
-    (order) => getDateKey(order.createdAt) !== todayKey
+    (order) => getDateKey(order.createdAt) !== todayKey,
   );
 
   return (
@@ -969,28 +1233,29 @@ export default async function Home() {
 
             <div className="flex w-full flex-col gap-4 lg:w-[320px] lg:min-w-[320px] lg:max-w-[320px] lg:flex-none">
               <div className="flex flex-col items-start gap-2 lg:items-end">
-  <div className="flex flex-wrap items-center gap-2">
-    <a
-      href="/fsh/cogs"
-      className="rounded-xl border border-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:border-zinc-600 hover:text-white"
-    >
-      COGS
-    </a>
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href="/fsh/cogs"
+                    className="rounded-xl border border-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:border-zinc-600 hover:text-white"
+                  >
+                    COGS
+                  </a>
 
-    <a
-      href="/fsh/shipping"
-      className="rounded-xl border border-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:border-zinc-600 hover:text-white"
-    >
-      Shipping
-    </a>
+                  <a
+                    href="/fsh/shipping"
+                    className="rounded-xl border border-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:border-zinc-600 hover:text-white"
+                  >
+                    Shipping
+                  </a>
 
-    <SyncButton />
-  </div>
+                  <SyncButton />
+                </div>
 
-  <span className="text-xs text-zinc-500">
-    Last synced: {formatLastSynced(lastSyncValue?.finishedAt ?? null)}
-  </span>
-</div>
+                <span className="text-xs text-zinc-500">
+                  Last synced:{" "}
+                  {formatLastSynced(lastSyncValue?.finishedAt ?? null)}
+                </span>
+              </div>
 
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 p-4 lg:ml-auto lg:w-[320px]">
                 <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
@@ -1099,9 +1364,7 @@ export default async function Home() {
             emoji={netProfitValues.today >= 0 ? "🟢" : "🔴"}
             value={signedMoney(netProfitValues.today)}
             valueClassName={
-              netProfitValues.today >= 0
-                ? "text-emerald-400"
-                : "text-rose-400"
+              netProfitValues.today >= 0 ? "text-emerald-400" : "text-rose-400"
             }
             lines={[
               {
@@ -1253,16 +1516,16 @@ export default async function Home() {
                   thirtyDay={signedMoney(netProfitValues.thirtyDay)}
                   lifetime={signedMoney(netProfitValues.lifetime)}
                   yesterdayClassName={getNetProfitTextClass(
-                    netProfitValues.yesterday
+                    netProfitValues.yesterday,
                   )}
                   sevenDayClassName={getNetProfitTextClass(
-                    netProfitValues.sevenDay
+                    netProfitValues.sevenDay,
                   )}
                   thirtyDayClassName={getNetProfitTextClass(
-                    netProfitValues.thirtyDay
+                    netProfitValues.thirtyDay,
                   )}
                   lifetimeClassName={getNetProfitTextClass(
-                    netProfitValues.lifetime
+                    netProfitValues.lifetime,
                   )}
                 />
 
@@ -1314,10 +1577,7 @@ export default async function Home() {
               value={totalProductsValues.lifetime}
             />
 
-            <BottomStatCard
-              label="Total Orders"
-              value={orderValues.lifetime}
-            />
+            <BottomStatCard label="Total Orders" value={orderValues.lifetime} />
           </div>
         </section>
 
