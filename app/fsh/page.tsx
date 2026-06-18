@@ -9,6 +9,7 @@ import { getMetaSnapshot } from "@/lib/meta";
 import { calculateShippingCost } from "@/utils/shipping";
 import { getProductCost } from "@/utils/cogs";
 import SyncButton from "@/components/SyncButton";
+import MetaBackfillButton from "@/components/MetaBackfillButton";
 
 const TIME_ZONE = "Europe/Amsterdam";
 const PROCESSING_FEE_RATE = 0.029;
@@ -1246,6 +1247,8 @@ export default async function Home() {
                   </a>
 
                   <SyncButton />
+
+                  <MetaBackfillButton />
                 </div>
 
                 <span className="text-xs text-zinc-500">
