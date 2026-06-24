@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { saveShowField, type EditableShowField } from "@/lib/show-client";
 import {
   saveTourSetting,
@@ -74,6 +74,42 @@ function formatChartDate(dateString: string) {
     day: "numeric",
     month: "short",
   }).format(new Date(`${dateString}T00:00:00`));
+}
+
+
+const CHART_DAY_WIDTH = 72;
+const CAMPAIGN_WEEK_START_DATE = META_CPT_START_DATE;
+
+function dateKey(date: Date) {
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function parseDateKey(dateString: string) {
+  const [year, month, day] = dateString.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function addDays(dateString: string, days: number) {
+  const date = parseDateKey(dateString);
+  date.setUTCDate(date.getUTCDate() + days);
+  return dateKey(date);
+}
+
+function daysBetween(startDateString: string, endDateString: string) {
+  const startDate = parseDateKey(startDateString);
+  const endDate = parseDateKey(endDateString);
+  return Math.floor(
+    (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)
+  );
+}
+
+function getCampaignWeekNumber(dateString: string) {
+  const diff = daysBetween(CAMPAIGN_WEEK_START_DATE, dateString);
+  return Math.floor(Math.max(diff, 0) / 7) + 1;
 }
 
 type WeeklyTicketSalesPoint = {
@@ -258,9 +294,15 @@ function WeeklySalesProgressCard({ show }: { show: TourShow }) {
 }
 
 function calculateCampaignTickets(show: TourShow) {
-  return show.dailyTicketSales
+  const campaignTicketsFromDailySales = show.dailyTicketSales
     .filter((point) => point.date >= META_CPT_START_DATE)
     .reduce((sum, point) => sum + point.ticketSales, 0);
+
+  if (campaignTicketsFromDailySales > 0) {
+    return campaignTicketsFromDailySales;
+  }
+
+  return show.ticketSales;
 }
 
 function calculateShowTotalCost(show: TourShow) {
@@ -325,14 +367,86 @@ function KpiCard({
   );
 }
 
+type CampaignWeekChartGroup = {
+  weekNumber: number;
+  weekStart: string;
+  weekEnd: string;
+  ticketSales: number;
+  ticketRevenue: number;
+};
+
+function buildContinuousChartData(data: DailyTicketSalesPoint[]) {
+  const campaignData = data.filter((point) => point.date >= CAMPAIGN_WEEK_START_DATE);
+
+  if (campaignData.length === 0) return [];
+
+  const latestDate = campaignData.reduce((latest, point) => {
+    return point.date > latest ? point.date : latest;
+  }, CAMPAIGN_WEEK_START_DATE);
+
+  const salesByDate = new Map(campaignData.map((point) => [point.date, point]));
+  const totalDays = daysBetween(CAMPAIGN_WEEK_START_DATE, latestDate);
+
+  return Array.from({ length: totalDays + 1 }, (_, index) => {
+    const date = addDays(CAMPAIGN_WEEK_START_DATE, index);
+    const existing = salesByDate.get(date);
+
+    return {
+      date,
+      label: formatChartDate(date),
+      ticketSales: existing?.ticketSales ?? 0,
+      ticketRevenue: existing?.ticketRevenue ?? 0,
+    };
+  });
+}
+
+function buildCampaignWeekGroups(
+  data: DailyTicketSalesPoint[]
+): CampaignWeekChartGroup[] {
+  const chartData = buildContinuousChartData(data);
+  const groups = new Map<number, CampaignWeekChartGroup>();
+
+  chartData.forEach((point) => {
+    const weekNumber = getCampaignWeekNumber(point.date);
+    const weekStart = addDays(CAMPAIGN_WEEK_START_DATE, (weekNumber - 1) * 7);
+    const weekEnd = addDays(weekStart, 6);
+    const existing = groups.get(weekNumber) ?? {
+      weekNumber,
+      weekStart,
+      weekEnd,
+      ticketSales: 0,
+      ticketRevenue: 0,
+    };
+
+    existing.ticketSales += point.ticketSales;
+    existing.ticketRevenue += point.ticketRevenue;
+
+    groups.set(weekNumber, existing);
+  });
+
+  return Array.from(groups.values()).sort(
+    (a, b) => a.weekNumber - b.weekNumber
+  );
+}
+
 function DailyTicketSalesChart({
   data,
 }: {
   data: DailyTicketSalesPoint[];
 }) {
-  const maxTickets = Math.max(...data.map((point) => point.ticketSales), 0);
-  const totalTickets = data.reduce((sum, point) => sum + point.ticketSales, 0);
-  const totalRevenue = data.reduce((sum, point) => sum + point.ticketRevenue, 0);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const chartData = useMemo(() => buildContinuousChartData(data), [data]);
+  const weeklyGroups = useMemo(() => buildCampaignWeekGroups(data), [data]);
+  const maxTickets = Math.max(...chartData.map((point) => point.ticketSales), 0);
+  const totalTickets = chartData.reduce((sum, point) => sum + point.ticketSales, 0);
+  const totalRevenue = chartData.reduce((sum, point) => sum + point.ticketRevenue, 0);
+
+  useEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (!scrollElement) return;
+
+    scrollElement.scrollLeft = scrollElement.scrollWidth;
+  }, [chartData.length]);
 
   return (
     <section className="mb-8 rounded-3xl border border-zinc-800 bg-zinc-900/90 p-5">
@@ -340,59 +454,92 @@ function DailyTicketSalesChart({
         <div>
           <h2 className="text-2xl font-semibold text-white">Daily Ticket Sales</h2>
           <p className="mt-1 text-sm text-zinc-400">
-            Live Eventbrite sales grouped by purchase date across the tour. Revenue excludes Eventbrite fees.
+            Ticket sales from 15 Jun onwards. Scroll left to view older dates.
           </p>
         </div>
 
         <div className="grid grid-cols-2 gap-3 text-right">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 px-4 py-3">
-            <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Tickets</div>
+            <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Tickets 15 Jun+</div>
             <div className="mt-1 text-xl font-semibold text-white">{totalTickets}</div>
           </div>
 
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 px-4 py-3">
-            <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Revenue</div>
+            <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Revenue 15 Jun+</div>
             <div className="mt-1 text-xl font-semibold text-white">{money(totalRevenue)}</div>
           </div>
         </div>
       </div>
 
-      {data.length === 0 ? (
+      {chartData.length === 0 ? (
         <div className="flex h-64 items-center justify-center rounded-2xl border border-dashed border-zinc-700 bg-zinc-950/50 text-sm text-zinc-500">
-          No Eventbrite ticket sales data yet.
+          No ticket sales data from 15 Jun onwards yet.
         </div>
       ) : (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
-          <div className="flex h-72 items-end gap-3 overflow-x-auto pb-2">
-            {data.map((point) => {
-              const heightPercent =
-                maxTickets === 0 ? 0 : Math.max((point.ticketSales / maxTickets) * 100, 8);
+          <div ref={scrollRef} className="overflow-x-auto pb-3">
+            <div className="min-w-max">
+              <div className="flex h-72 items-end gap-3">
+                {chartData.map((point) => {
+                  const heightPercent =
+                    maxTickets === 0
+                      ? 0
+                      : point.ticketSales === 0
+                        ? 0
+                        : Math.max((point.ticketSales / maxTickets) * 100, 8);
 
-              return (
-                <div
-                  key={point.date}
-                  className="flex min-w-[72px] flex-1 flex-col items-center justify-end gap-2"
-                  title={`${formatChartDate(point.date)}: ${point.ticketSales} tickets, ${money(
-                    point.ticketRevenue
-                  )}`}
-                >
-                  <div className="text-xs font-medium text-zinc-300">
-                    {point.ticketSales}
-                  </div>
-
-                  <div className="flex h-48 w-full items-end rounded-xl bg-zinc-900/80 p-1">
+                  return (
                     <div
-                      className="w-full rounded-lg bg-emerald-400/80 transition hover:bg-emerald-300"
-                      style={{ height: `${heightPercent}%` }}
-                    />
-                  </div>
+                      key={point.date}
+                      className="flex shrink-0 flex-col items-center justify-end gap-2"
+                      style={{ width: CHART_DAY_WIDTH }}
+                      title={`${formatChartDate(point.date)}: ${point.ticketSales} tickets, ${money(
+                        point.ticketRevenue
+                      )}`}
+                    >
+                      <div className="text-xs font-medium text-zinc-300">
+                        {point.ticketSales === 0 ? "" : point.ticketSales}
+                      </div>
 
-                  <div className="text-center text-xs text-zinc-500">
-                    {formatChartDate(point.date)}
-                  </div>
-                </div>
-              );
-            })}
+                      <div className="flex h-48 w-full items-end rounded-xl bg-zinc-900/80 p-1">
+                        <div
+                          className="w-full rounded-lg bg-emerald-400/80 transition hover:bg-emerald-300"
+                          style={{ height: `${heightPercent}%` }}
+                        />
+                      </div>
+
+                      <div className="text-center text-xs text-zinc-500">
+                        {formatChartDate(point.date)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mt-4 flex gap-3">
+                {weeklyGroups.map((week) => {
+                  const weekWidth = CHART_DAY_WIDTH * 7 + 12 * 6;
+
+                  return (
+                    <div
+                      key={week.weekNumber}
+                      className="rounded-xl border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-center"
+                      style={{ width: weekWidth }}
+                      title={`${formatChartDate(week.weekStart)} - ${formatChartDate(
+                        week.weekEnd
+                      )}: ${week.ticketSales} tickets`}
+                    >
+                      <div className="text-sm font-semibold text-emerald-400">
+                        Week {week.weekNumber} - {week.ticketSales} tickets
+                      </div>
+                      <div className="mt-1 text-xs text-zinc-500">
+                        {formatChartDate(week.weekStart)} - {formatChartDate(week.weekEnd)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       )}
