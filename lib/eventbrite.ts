@@ -46,11 +46,44 @@ const EVENTBRITE_EVENT_IDS_BY_SLUG: Record<string, string> = {
   "amsterdam-2026": "1990699029385",
 };
 
+const DASHBOARD_TIME_ZONE = "Europe/Amsterdam";
+
+function getDateFromDateKey(dateString: string) {
+  const [year, month, day] = dateString.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
 function formatDailySalesLabel(dateString: string) {
   return new Intl.DateTimeFormat("en-GB", {
     day: "numeric",
     month: "short",
-  }).format(new Date(`${dateString}T00:00:00`));
+    timeZone: "UTC",
+  }).format(getDateFromDateKey(dateString));
+}
+
+function getDashboardDateKey(dateTimeString: string) {
+  const date = new Date(dateTimeString);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: DASHBOARD_TIME_ZONE,
+  }).formatToParts(date);
+
+  const day = parts.find((part) => part.type === "day")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const year = parts.find((part) => part.type === "year")?.value;
+
+  if (!day || !month || !year) {
+    return null;
+  }
+
+  return `${year}-${month}-${day}`;
 }
 
 function isValidAttendee(attendee: EventbriteAttendee) {
@@ -128,7 +161,10 @@ export async function getEventbriteShowStatsBySlug(
   validAttendees.forEach((attendee) => {
     if (!attendee.created) return;
 
-    const date = attendee.created.slice(0, 10);
+    const date = getDashboardDateKey(attendee.created);
+
+    if (!date) return;
+
     const basePrice = getAttendeeBasePrice(attendee);
     const existing = dailySalesByDate.get(date);
 
