@@ -1,5 +1,4 @@
 import SyncButton from "@/components/SyncButton";
-import MobileNav from "@/components/MobileNav";
 import { prisma } from "@/lib/prisma";
 import { getMetaSnapshot } from "@/lib/meta";
 import { calculateShippingCost } from "@/utils/shipping";
@@ -381,7 +380,6 @@ export default async function Home() {
 
   return (
     <main className="min-h-screen bg-zinc-950 text-white">
-      <MobileNav />
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-12">
         <header className="mb-14 text-center">
           <p className="mb-3 text-sm uppercase tracking-[0.35em] text-zinc-500">
