@@ -1,7 +1,13 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { saveShowField, type EditableShowField } from "@/lib/show-client";
+import { useRouter } from "next/navigation";
+import {
+  saveManualTicketSnapshot,
+  saveShowField,
+  type EditableShowField,
+} from "@/lib/show-client";
+import { NIJMEGEN_SHOW_SLUG } from "@/lib/manual-ticket-sales";
 import {
   saveTourSetting,
   type EditableTourSettingField,
@@ -14,6 +20,7 @@ export type DailyTicketSalesPoint = {
   label: string;
   ticketSales: number;
   ticketRevenue: number;
+  estimated?: boolean;
 };
 
 export type TourShow = {
@@ -373,6 +380,7 @@ type CampaignWeekChartGroup = {
   weekEnd: string;
   ticketSales: number;
   ticketRevenue: number;
+  estimated: boolean;
 };
 
 function buildContinuousChartData(data: DailyTicketSalesPoint[]) {
@@ -396,6 +404,7 @@ function buildContinuousChartData(data: DailyTicketSalesPoint[]) {
       label: formatChartDate(date),
       ticketSales: existing?.ticketSales ?? 0,
       ticketRevenue: existing?.ticketRevenue ?? 0,
+      estimated: existing?.estimated ?? false,
     };
   });
 }
@@ -416,10 +425,12 @@ function buildCampaignWeekGroups(
       weekEnd,
       ticketSales: 0,
       ticketRevenue: 0,
+      estimated: false,
     };
 
     existing.ticketSales += point.ticketSales;
     existing.ticketRevenue += point.ticketRevenue;
+    existing.estimated ||= Boolean(point.estimated);
 
     groups.set(weekNumber, existing);
   });
@@ -455,6 +466,9 @@ function DailyTicketSalesChart({
           <h2 className="text-2xl font-semibold text-white">Daily Ticket Sales</h2>
           <p className="mt-1 text-sm text-zinc-400">
             Ticket sales from 15 Jun onwards. Scroll left to view older dates.
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">
+            Nijmegen sales are estimated evenly from cumulative Monday updates.
           </p>
         </div>
 
@@ -495,7 +509,7 @@ function DailyTicketSalesChart({
                       style={{ width: CHART_DAY_WIDTH }}
                       title={`${formatChartDate(point.date)}: ${point.ticketSales} tickets, ${money(
                         point.ticketRevenue
-                      )}`}
+                      )}${point.estimated ? " (includes estimated Nijmegen sales)" : ""}`}
                     >
                       <div className="text-xs font-medium text-zinc-300">
                         {point.ticketSales === 0 ? "" : point.ticketSales}
@@ -527,7 +541,9 @@ function DailyTicketSalesChart({
                       style={{ width: weekWidth }}
                       title={`${formatChartDate(week.weekStart)} - ${formatChartDate(
                         week.weekEnd
-                      )}: ${week.ticketSales} tickets`}
+                      )}: ${week.ticketSales} tickets${
+                        week.estimated ? " (includes estimated Nijmegen sales)" : ""
+                      }`}
                     >
                       <div className="text-sm font-semibold text-emerald-400">
                         Week {week.weekNumber} - {week.ticketSales} tickets
@@ -554,6 +570,7 @@ export default function TourDashboardClient({
   initialShows: TourShow[];
   initialSettings: TourSettings;
 }) {
+  const router = useRouter();
   const [shows, setShows] = useState<TourShow[]>(initialShows);
   const [expandedShowId, setExpandedShowId] = useState<string | null>(null);
   const [tourEconomicsOpen, setTourEconomicsOpen] = useState(false);
@@ -570,6 +587,10 @@ export default function TourDashboardClient({
     plannedAdBudget: "idle",
     blendedCpt: "idle",
   });
+
+  useEffect(() => {
+    setShows(initialShows);
+  }, [initialShows]);
 
   const kpis = useMemo(() => {
     const upcomingShows = shows.length;
@@ -636,6 +657,7 @@ export default function TourDashboardClient({
         if (existing) {
           existing.ticketSales += point.ticketSales;
           existing.ticketRevenue += point.ticketRevenue;
+          existing.estimated ||= Boolean(point.estimated);
           return;
         }
 
@@ -682,6 +704,33 @@ export default function TourDashboardClient({
           if (next[key] === "saved") {
             delete next[key];
           }
+          return next;
+        });
+      }, 1500);
+    } catch (error) {
+      console.error(error);
+      setSaveStates((prev) => ({ ...prev, [key]: "error" }));
+    }
+  }
+
+  async function persistTicketSales(show: TourShow, value: number) {
+    if (show.slug !== NIJMEGEN_SHOW_SLUG) {
+      await persistField(show.id, "ticketSales", value);
+      return;
+    }
+
+    const key = getSaveKey(show.id, "ticketSales");
+
+    try {
+      setSaveStates((prev) => ({ ...prev, [key]: "saving" }));
+      await saveManualTicketSnapshot(show.id, value);
+      setSaveStates((prev) => ({ ...prev, [key]: "saved" }));
+      router.refresh();
+
+      setTimeout(() => {
+        setSaveStates((prev) => {
+          const next = { ...prev };
+          if (next[key] === "saved") delete next[key];
           return next;
         });
       }, 1500);
@@ -1020,7 +1069,11 @@ export default function TourDashboardClient({
                                   </label>
 
                                   <label className="grid gap-2">
-                                    <span className="text-sm text-zinc-400">Tickets Sold</span>
+                                    <span className="text-sm text-zinc-400">
+                                      {show.slug === NIJMEGEN_SHOW_SLUG
+                                        ? "Cumulative Tickets (Monday update)"
+                                        : "Tickets Sold"}
+                                    </span>
                                     <input
                                       type="number"
                                       value={show.ticketSales}
@@ -1031,9 +1084,8 @@ export default function TourDashboardClient({
                                         }))
                                       }
                                       onBlur={(e) =>
-                                        persistField(
-                                          show.id,
-                                          "ticketSales",
+                                        persistTicketSales(
+                                          show,
                                           Number(e.target.value) || 0
                                         )
                                       }

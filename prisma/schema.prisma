@@ -26,8 +26,24 @@ model Show {
   production      Float @default(0)
   hotelPetrolMisc Float @default(0)
 
+  manualTicketSnapshots ManualTicketSnapshot[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model ManualTicketSnapshot {
+  id                String   @id @default(cuid())
+  showId            String
+  snapshotDate      DateTime @db.Date
+  cumulativeTickets Int
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  show Show @relation(fields: [showId], references: [id], onDelete: Cascade)
+
+  @@unique([showId, snapshotDate])
+  @@index([showId, snapshotDate])
 }
 
 model TourSettings {
@@ -148,6 +164,7 @@ model TourVote {
   @@index([selectedCity])
   @@index([selectedCountry])
 }
+
 model CogsCostEntry {
   id            String   @id @default(cuid())
   itemKey       String
@@ -163,18 +180,19 @@ model CogsCostEntry {
   @@index([category])
   @@index([effectiveFrom])
 }
+
 model ShippingCostEntry {
-  id              String   @id @default(cuid())
-  countryCode     String
-  countryName     String
-  cd1OnlyCost     Float?
-  cdPackageCost   Float
-  vinylCost       Float
-  vinylIncludesCds Boolean @default(false)
-  effectiveFrom   DateTime
-  notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               String   @id @default(cuid())
+  countryCode      String
+  countryName      String
+  cd1OnlyCost      Float?
+  cdPackageCost    Float
+  vinylCost        Float
+  vinylIncludesCds Boolean  @default(false)
+  effectiveFrom    DateTime
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   @@index([countryCode])
   @@index([effectiveFrom])

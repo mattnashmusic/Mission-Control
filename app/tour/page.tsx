@@ -5,11 +5,20 @@ import { getEventbriteShowStatsBySlug } from "@/lib/eventbrite";
 import { getTourMetaSnapshot } from "@/lib/meta-tour";
 import { prisma } from "@/lib/prisma";
 import { TOUR_META_CAMPAIGN_IDS_BY_SLUG } from "@/lib/tour-show-meta-campaigns";
+import {
+  buildEstimatedDailyTicketSales,
+  NIJMEGEN_SHOW_SLUG,
+} from "@/lib/manual-ticket-sales";
 
 export default async function TourPage() {
   const [shows, settings] = await Promise.all([
     prisma.show.findMany({
       orderBy: { date: "asc" },
+      include: {
+        manualTicketSnapshots: {
+          orderBy: { snapshotDate: "asc" },
+        },
+      },
     }),
     prisma.tourSettings.findUnique({
       where: { id: "main" },
@@ -18,7 +27,23 @@ export default async function TourPage() {
 
   const initialShows: TourShow[] = await Promise.all(
     shows.map(async (show: (typeof shows)[number]) => {
-      const eventbriteStats = await getEventbriteShowStatsBySlug(show.slug);
+      const isNijmegen = show.slug === NIJMEGEN_SHOW_SLUG;
+      const eventbriteStats = isNijmegen
+        ? null
+        : await getEventbriteShowStatsBySlug(show.slug);
+      const estimatedDailyTicketSales = isNijmegen
+        ? buildEstimatedDailyTicketSales(
+            show.manualTicketSnapshots,
+            show.ticketPrice
+          )
+        : [];
+      const latestManualSnapshot = isNijmegen
+        ? show.manualTicketSnapshots.at(-1)
+        : null;
+      const ticketSales =
+        latestManualSnapshot?.cumulativeTickets ??
+        eventbriteStats?.ticketSales ??
+        show.ticketSales;
 
       const metaCampaignId = TOUR_META_CAMPAIGN_IDS_BY_SLUG[show.slug];
 
@@ -42,10 +67,12 @@ export default async function TourPage() {
         venue: show.venue,
         capacity: show.capacity,
         ticketPrice: show.ticketPrice,
-        ticketSales: eventbriteStats?.ticketSales ?? show.ticketSales,
+        ticketSales,
         ticketRevenue:
-          eventbriteStats?.ticketRevenue ?? show.ticketSales * show.ticketPrice,
-        dailyTicketSales: eventbriteStats?.dailyTicketSales ?? [],
+          eventbriteStats?.ticketRevenue ?? ticketSales * show.ticketPrice,
+        dailyTicketSales: isNijmegen
+          ? estimatedDailyTicketSales
+          : eventbriteStats?.dailyTicketSales ?? [],
         metaSpend: liveMetaSpend,
         notes: show.notes,
         costs: {

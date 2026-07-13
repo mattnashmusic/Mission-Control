@@ -141,6 +141,40 @@ async function main() {
       create: show,
     });
   }
+
+  const nijmegen = await prisma.show.findUnique({
+    where: { slug: "nijmegen-2026" },
+  });
+
+  if (nijmegen) {
+    const snapshots = [
+      { snapshotDate: new Date("2026-06-22"), cumulativeTickets: 36 },
+      { snapshotDate: new Date("2026-06-29"), cumulativeTickets: 56 },
+      { snapshotDate: new Date("2026-07-06"), cumulativeTickets: 74 },
+      { snapshotDate: new Date("2026-07-13"), cumulativeTickets: 90 },
+    ];
+
+    for (const snapshot of snapshots) {
+      await prisma.manualTicketSnapshot.upsert({
+        where: {
+          showId_snapshotDate: {
+            showId: nijmegen.id,
+            snapshotDate: snapshot.snapshotDate,
+          },
+        },
+        update: { cumulativeTickets: snapshot.cumulativeTickets },
+        create: {
+          showId: nijmegen.id,
+          ...snapshot,
+        },
+      });
+    }
+
+    await prisma.show.update({
+      where: { id: nijmegen.id },
+      data: { ticketSales: 90 },
+    });
+  }
 }
 
 main()

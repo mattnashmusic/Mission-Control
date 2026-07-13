@@ -30,3 +30,23 @@ export async function saveShowField(
 
   return res.json();
 }
+
+export async function saveManualTicketSnapshot(
+  showId: string,
+  cumulativeTickets: number
+) {
+  const res = await fetch("/api/shows/ticket-snapshots", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ showId, cumulativeTickets }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to save ticket snapshot");
+  }
+
+  return res.json();
+}
