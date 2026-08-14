@@ -87,9 +87,13 @@ const OUTLOOK_STYLES: Record<OutlookStatus, string> = {
 
 function OutlookBadge({ status }: { status: OutlookStatus }) {
   return (
-    <span className="inline-flex items-center justify-end gap-1.5 capitalize">
-      <span className={`h-2 w-2 rounded-full ${OUTLOOK_STYLES[status]}`} />
-      {status}
+    <span
+      className="inline-flex items-center justify-end"
+      aria-label={`${status} outlook`}
+      title={`${status[0].toUpperCase()}${status.slice(1)} outlook`}
+    >
+      <span className={`h-3 w-3 rounded-full ${OUTLOOK_STYLES[status]}`} />
+      <span className="sr-only">{status} outlook</span>
     </span>
   );
 }
@@ -950,7 +954,7 @@ export default function TourDashboardClient({
                         <td className="whitespace-nowrap px-4 py-4 text-right">
                           {forecastTickets === null || forecastPercent === null
                             ? "—"
-                            : `${forecastTickets} / ${capacity} · ${Math.round(forecastPercent)}%`}
+                            : `${forecastTickets} - ${Math.round(forecastPercent)}%`}
                         </td>
                         <td className="px-4 py-4 text-right">
                           <OutlookBadge status={outlook} />
