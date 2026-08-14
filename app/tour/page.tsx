@@ -2,7 +2,12 @@ import TourDashboardClient, {
   type TourShow,
 } from "@/components/tour/TourDashboardClient";
 import { getEventbriteShowStatsBySlug } from "@/lib/eventbrite";
-import { getTourMetaSnapshot } from "@/lib/meta-tour";
+import {
+  getTourMetaBudgetsByAdSetId,
+  getTourMetaSnapshot,
+  resolveTourDailyBudget,
+  type TourMetaBudgetResult,
+} from "@/lib/meta-tour";
 import { prisma } from "@/lib/prisma";
 import { TOUR_META_CAMPAIGN_IDS_BY_SLUG } from "@/lib/tour-show-meta-campaigns";
 import {
@@ -25,6 +30,18 @@ export default async function TourPage() {
     }),
   ]);
 
+  const mappedMetaAdSetIds = Object.values(TOUR_META_CAMPAIGN_IDS_BY_SLUG);
+  let metaBudgetsByAdSetId: Record<string, TourMetaBudgetResult> = {};
+
+  try {
+    metaBudgetsByAdSetId = await getTourMetaBudgetsByAdSetId(mappedMetaAdSetIds);
+  } catch (error) {
+    console.error(
+      "Failed to load Meta daily budgets; using manual fallbacks where available:",
+      error instanceof Error ? error.message : "Unknown Meta error"
+    );
+  }
+
   const initialShows: TourShow[] = await Promise.all(
     shows.map(async (show: (typeof shows)[number]) => {
       const isNijmegen = show.slug === NIJMEGEN_SHOW_SLUG;
@@ -45,18 +62,23 @@ export default async function TourPage() {
         eventbriteStats?.ticketSales ??
         show.ticketSales;
 
-      const metaCampaignId = TOUR_META_CAMPAIGN_IDS_BY_SLUG[show.slug];
+      const metaAdSetId = TOUR_META_CAMPAIGN_IDS_BY_SLUG[show.slug];
 
       let liveMetaSpend = show.metaSpend;
 
-      if (metaCampaignId) {
+      if (metaAdSetId) {
         try {
-          const metaSnapshot = await getTourMetaSnapshot(metaCampaignId);
+          const metaSnapshot = await getTourMetaSnapshot(metaAdSetId);
           liveMetaSpend = metaSnapshot.spend.lifetime;
         } catch (error) {
           console.error(`Failed to load Meta spend for ${show.slug}:`, error);
         }
       }
+
+      const resolvedDailyBudget = resolveTourDailyBudget(
+        metaAdSetId ? metaBudgetsByAdSetId[metaAdSetId] ?? null : null,
+        show.dailyAdBudget
+      );
 
       return {
         id: show.id,
@@ -75,6 +97,10 @@ export default async function TourPage() {
           : eventbriteStats?.dailyTicketSales ?? [],
         metaSpend: liveMetaSpend,
         dailyAdBudget: show.dailyAdBudget,
+        projectionDailyBudget: resolvedDailyBudget.dailyBudget,
+        dailyBudgetSource: resolvedDailyBudget.source,
+        dailyBudgetReason: resolvedDailyBudget.reason,
+        matchedMetaAdSets: resolvedDailyBudget.adSets,
         notes: show.notes,
         costs: {
           venueHire: show.venueHire,

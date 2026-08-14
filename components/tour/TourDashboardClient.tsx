@@ -8,6 +8,10 @@ import {
   type EditableShowField,
 } from "@/lib/show-client";
 import { NIJMEGEN_SHOW_SLUG } from "@/lib/manual-ticket-sales";
+import type {
+  TourBudgetSource,
+  TourMetaAdSetBudget,
+} from "@/lib/meta-tour";
 import {
   saveTourSetting,
   type EditableTourSettingField,
@@ -46,6 +50,10 @@ export type TourShow = {
   dailyTicketSales: DailyTicketSalesPoint[];
   metaSpend: number;
   dailyAdBudget: number | null;
+  projectionDailyBudget: number | null;
+  dailyBudgetSource: TourBudgetSource;
+  dailyBudgetReason: string;
+  matchedMetaAdSets: TourMetaAdSetBudget[];
   notes?: string | null;
   costs: {
     venueHire: number;
@@ -914,7 +922,7 @@ export default function TourDashboardClient({
                   const daysRemaining = calculateDaysUntilShow(show.date, today);
                   const projectedSpendDetails = calculateProjectedSpendDetails({
                     currentSpend: show.metaSpend,
-                    dailyBudget: show.dailyAdBudget,
+                    dailyBudget: show.projectionDailyBudget,
                     capacity,
                     ticketsSold: show.ticketSales,
                     costPerTicket: campaignTickets === 0 ? null : costPerTicket,
@@ -1050,9 +1058,30 @@ export default function TourDashboardClient({
                                     <div className="flex justify-between gap-3"><dt className="text-zinc-400">Current ticket sales</dt><dd>{show.ticketSales}</dd></div>
                                     <div className="flex justify-between gap-3"><dt className="text-zinc-400">Time remaining</dt><dd>{daysRemaining} days</dd></div>
                                     <div className="flex justify-between gap-3"><dt className="text-zinc-400">Current advertising spend</dt><dd>{money(show.metaSpend)}</dd></div>
-                                    <div className="flex justify-between gap-3"><dt className="text-zinc-400">Current daily budget</dt><dd>{show.dailyAdBudget === null ? "—" : money(show.dailyAdBudget)}</dd></div>
+                                    <div className="flex justify-between gap-3"><dt className="text-zinc-400">Current daily budget</dt><dd>{show.projectionDailyBudget === null ? "—" : `${money(show.projectionDailyBudget)}/day`}</dd></div>
+                                    <div className="flex justify-between gap-3"><dt className="text-zinc-400">Budget source</dt><dd className="capitalize">{show.dailyBudgetSource}</dd></div>
+                                    <div className="flex justify-between gap-3"><dt className="text-zinc-400">Days remaining</dt><dd>{daysRemaining}</dd></div>
+                                    <div className="flex justify-between gap-3"><dt className="text-zinc-400">Scheduled future spend</dt><dd>{projectedSpendDetails === null ? "—" : money(projectedSpendDetails.scheduledFutureSpend)}</dd></div>
+                                    <div className="flex justify-between gap-3"><dt className="text-zinc-400">Inventory spend cap</dt><dd>{projectedSpendDetails?.inventorySpendCap === null || projectedSpendDetails?.inventorySpendCap === undefined ? "Unavailable" : money(projectedSpendDetails.inventorySpendCap)}</dd></div>
                                     <div className="flex justify-between gap-3"><dt className="text-zinc-400">Projected additional spend</dt><dd>{additionalSpend === null ? "—" : money(additionalSpend)}</dd></div>
                                   </dl>
+                                  <div className="mt-4 text-sm text-zinc-400">
+                                    {show.dailyBudgetSource === "meta" && show.projectionDailyBudget !== null
+                                      ? `${money(show.projectionDailyBudget)}/day from Meta across ${show.matchedMetaAdSets.filter((adSet) => adSet.included).length} active ad set${show.matchedMetaAdSets.filter((adSet) => adSet.included).length === 1 ? "" : "s"}.`
+                                      : show.dailyBudgetSource === "manual" && show.projectionDailyBudget !== null
+                                        ? `${money(show.projectionDailyBudget)}/day — manual fallback because ${show.dailyBudgetReason.toLowerCase()}`
+                                        : show.dailyBudgetReason}
+                                    {show.matchedMetaAdSets.length > 0 ? (
+                                      <ul className="mt-2 space-y-1">
+                                        {show.matchedMetaAdSets.map((adSet) => (
+                                          <li key={adSet.id}>
+                                            {adSet.name} — {adSet.effectiveStatus ?? adSet.configuredStatus ?? "status unavailable"}
+                                            {adSet.included ? " (included)" : " (excluded)"}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    ) : null}
+                                  </div>
                                   <p className="mt-4 text-sm text-zinc-400">
                                     {showWeeklyMomentum === null
                                       ? "Reliable show-level ticket history is unavailable for the previous 28 days."
@@ -1060,7 +1089,7 @@ export default function TourDashboardClient({
                                   </p>
                                   <p className="mt-2 text-sm text-zinc-400">
                                     {projectedSpendDetails === null
-                                      ? "Projected spend is unavailable because no daily budget is saved."
+                                      ? "Projected spend is unavailable because neither Meta nor the manual fallback supplied a daily budget."
                                       : projectedSpendDetails.inventorySpendCap === null || projectedSpendDetails.remainingInventory === null || projectedSpendDetails.cappedCostPerTicket === null
                                         ? `${money(show.metaSpend)} spent + ${money(projectedSpendDetails.scheduledFutureSpend)} scheduled = ${money(projectedSpendDetails.projectedSpend)} projected. Inventory cap unavailable because Cost / Ticket is unavailable.`
                                         : `${money(show.metaSpend)} spent + min(${money(projectedSpendDetails.scheduledFutureSpend)} scheduled, ${projectedSpendDetails.remainingInventory} tickets × ${money(projectedSpendDetails.cappedCostPerTicket)}) = ${money(projectedSpendDetails.projectedSpend)} projected.`}
