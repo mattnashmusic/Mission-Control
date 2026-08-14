@@ -5,6 +5,7 @@ import {
   calculateForecastTickets,
   calculateOutlook,
   calculateProjectedSpend,
+  calculateProjectedSpendDetails,
   calculateShowWeeklyMomentum,
 } from "./tour-outlook";
 
@@ -134,46 +135,91 @@ test("missing show-level ticket history produces no momentum or forecast", () =>
   );
 });
 
+function projectedSpend(overrides: Partial<Parameters<typeof calculateProjectedSpend>[0]> = {}) {
+  return calculateProjectedSpend({
+    currentSpend: 100,
+    dailyBudget: 5,
+    capacity: 200,
+    ticketsSold: 100,
+    costPerTicket: 10,
+    showDate: "2026-08-21",
+    today,
+    ...overrides,
+  });
+}
+
+test("Nijmegen-style projection is capped by remaining inventory", () => {
+  const details = calculateProjectedSpendDetails({
+    currentSpend: 299.18,
+    dailyBudget: 5,
+    capacity: 180,
+    ticketsSold: 158,
+    costPerTicket: 1.89,
+    showDate: "2026-12-01",
+    today,
+  });
+
+  assert.equal(details?.remainingInventory, 22);
+  assert.equal(details?.inventorySpendCap, 41.58);
+  assert.equal(details?.additionalProjectedSpend, 41.58);
+  assert.equal(details?.projectedSpend, 340.76);
+});
+
+test("time-based spend is retained when below the inventory cap", () => {
+  assert.equal(projectedSpend({ dailyBudget: 2 }), 114);
+});
+
+test("sold-out and zero-remaining-inventory shows add no projected spend", () => {
+  assert.equal(projectedSpend({ capacity: 100, ticketsSold: 100 }), 100);
+  assert.equal(projectedSpend({ capacity: 0, ticketsSold: 0 }), 100);
+});
+
 test("missing daily budget has no implicit fallback and produces no projection", () => {
   assert.equal(
-    calculateProjectedSpend({
-      currentSpend: 100,
-      dailyBudget: null,
-      showDate: "2026-08-21",
-      today,
-    }),
+    projectedSpend({ dailyBudget: null }),
     null
   );
 });
 
 test("zero daily budget keeps projected spend equal to current spend", () => {
-  assert.equal(
-    calculateProjectedSpend({
-      currentSpend: 100,
-      dailyBudget: 0,
-      showDate: "2026-08-21",
-      today,
-    }),
-    100
-  );
+  assert.equal(projectedSpend({ dailyBudget: 0 }), 100);
+});
+
+test("missing Cost per Ticket uses the ordinary time-based projection", () => {
+  const details = calculateProjectedSpendDetails({
+    currentSpend: 100,
+    dailyBudget: 5,
+    capacity: 101,
+    ticketsSold: 100,
+    costPerTicket: null,
+    showDate: "2026-08-21",
+    today,
+  });
+
+  assert.equal(details?.inventorySpendCap, null);
+  assert.equal(details?.scheduledFutureSpend, 35);
+  assert.equal(details?.projectedSpend, 135);
+});
+
+test("past show dates add no projected spend", () => {
+  assert.equal(projectedSpend({ showDate: "2026-08-13" }), 100);
+});
+
+test("projected spend never falls below actual spend", () => {
+  assert.equal(projectedSpend({ dailyBudget: -5 }), 100);
+  assert.equal(projectedSpend({ capacity: 50, ticketsSold: 100 }), 100);
 });
 
 test("separate shows use their own explicitly saved daily budgets", () => {
   assert.equal(
-    calculateProjectedSpend({
-      currentSpend: 100,
+    projectedSpend({
       dailyBudget: 2,
-      showDate: "2026-08-21",
-      today,
     }),
     114
   );
   assert.equal(
-    calculateProjectedSpend({
-      currentSpend: 100,
+    projectedSpend({
       dailyBudget: 7,
-      showDate: "2026-08-21",
-      today,
     }),
     149
   );
@@ -186,6 +232,9 @@ test("daily budgets do not change actual Meta spend or Cost per Ticket", () => {
   calculateProjectedSpend({
     currentSpend: actualMetaSpend,
     dailyBudget: 5,
+    capacity: 200,
+    ticketsSold: 52,
+    costPerTicket: actualMetaSpend / campaignTickets,
     showDate: "2026-08-21",
     today,
   });

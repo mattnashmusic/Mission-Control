@@ -17,7 +17,7 @@ import {
   calculateDaysUntilShow,
   calculateForecastTickets,
   calculateOutlook,
-  calculateProjectedSpend,
+  calculateProjectedSpendDetails,
   calculateShowWeeklyMomentum,
   type OutlookStatus,
 } from "@/lib/tour-outlook";
@@ -908,14 +908,18 @@ export default function TourDashboardClient({
                       ? null
                       : (forecastTickets / capacity) * 100;
                   const daysRemaining = calculateDaysUntilShow(show.date, today);
-                  const projectedSpend = calculateProjectedSpend({
+                  const projectedSpendDetails = calculateProjectedSpendDetails({
                     currentSpend: show.metaSpend,
                     dailyBudget: show.dailyAdBudget,
+                    capacity,
+                    ticketsSold: show.ticketSales,
+                    costPerTicket: campaignTickets === 0 ? null : costPerTicket,
                     showDate: show.date,
                     today,
                   });
+                  const projectedSpend = projectedSpendDetails?.projectedSpend ?? null;
                   const additionalSpend =
-                    projectedSpend === null ? null : projectedSpend - show.metaSpend;
+                    projectedSpendDetails?.additionalProjectedSpend ?? null;
                   const outlookReason =
                     forecastPercent === null
                       ? "Insufficient ticket history or capacity for an outlook."
@@ -1051,9 +1055,11 @@ export default function TourDashboardClient({
                                       : `Based on this show’s average of ${showWeeklyMomentum.toFixed(1)} tickets per week during the previous 28 days.`}
                                   </p>
                                   <p className="mt-2 text-sm text-zinc-400">
-                                    {projectedSpend === null || show.dailyAdBudget === null
+                                    {projectedSpendDetails === null
                                       ? "Projected spend is unavailable because no daily budget is saved."
-                                      : `${money(show.metaSpend)} spent + ${daysRemaining} days × ${money(show.dailyAdBudget)}/day = ${money(projectedSpend)} projected.`}
+                                      : projectedSpendDetails.inventorySpendCap === null || projectedSpendDetails.remainingInventory === null || projectedSpendDetails.cappedCostPerTicket === null
+                                        ? `${money(show.metaSpend)} spent + ${money(projectedSpendDetails.scheduledFutureSpend)} scheduled = ${money(projectedSpendDetails.projectedSpend)} projected. Inventory cap unavailable because Cost / Ticket is unavailable.`
+                                        : `${money(show.metaSpend)} spent + min(${money(projectedSpendDetails.scheduledFutureSpend)} scheduled, ${projectedSpendDetails.remainingInventory} tickets × ${money(projectedSpendDetails.cappedCostPerTicket)}) = ${money(projectedSpendDetails.projectedSpend)} projected.`}
                                   </p>
                                   <p className="mt-4 border-t border-zinc-800 pt-4 text-sm text-zinc-400">
                                     <span className="mr-2 text-zinc-200"><OutlookBadge status={outlook} /></span>

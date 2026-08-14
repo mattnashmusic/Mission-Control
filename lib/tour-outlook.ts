@@ -84,16 +84,89 @@ export function calculateOutlook(
 export function calculateProjectedSpend({
   currentSpend,
   dailyBudget,
+  capacity,
+  ticketsSold,
+  costPerTicket,
   showDate,
   today,
 }: {
   currentSpend: number;
   dailyBudget: number | null;
+  capacity: number | null;
+  ticketsSold: number;
+  costPerTicket: number | null;
   showDate: string;
   today: Date;
 }): number | null {
+  return calculateProjectedSpendDetails({
+    currentSpend,
+    dailyBudget,
+    capacity,
+    ticketsSold,
+    costPerTicket,
+    showDate,
+    today,
+  })?.projectedSpend ?? null;
+}
+
+export type ProjectedSpendDetails = {
+  projectedSpend: number;
+  additionalProjectedSpend: number;
+  scheduledFutureSpend: number;
+  remainingInventory: number | null;
+  inventorySpendCap: number | null;
+  cappedCostPerTicket: number | null;
+};
+
+export function calculateProjectedSpendDetails({
+  currentSpend,
+  dailyBudget,
+  capacity,
+  ticketsSold,
+  costPerTicket,
+  showDate,
+  today,
+}: {
+  currentSpend: number;
+  dailyBudget: number | null;
+  capacity: number | null;
+  ticketsSold: number;
+  costPerTicket: number | null;
+  showDate: string;
+  today: Date;
+}): ProjectedSpendDetails | null {
   if (dailyBudget === null) return null;
-  return currentSpend + dailyBudget * calculateDaysUntilShow(showDate, today);
+
+  const scheduledFutureSpend =
+    Math.max(dailyBudget, 0) * calculateDaysUntilShow(showDate, today);
+  const remainingInventory =
+    capacity === null ? null : Math.max(capacity - ticketsSold, 0);
+  const hasValidCostPerTicket =
+    costPerTicket !== null &&
+    Number.isFinite(costPerTicket) &&
+    costPerTicket >= 0;
+  const cappedCostPerTicket = hasValidCostPerTicket
+    ? Math.round(costPerTicket * 100) / 100
+    : null;
+  const inventorySpendCap =
+    remainingInventory === null || cappedCostPerTicket === null
+      ? null
+      : remainingInventory * cappedCostPerTicket;
+  const additionalProjectedSpend = Math.max(
+    0,
+    inventorySpendCap === null
+      ? scheduledFutureSpend
+      : Math.min(scheduledFutureSpend, inventorySpendCap)
+  );
+
+  return {
+    projectedSpend: currentSpend + additionalProjectedSpend,
+    additionalProjectedSpend,
+    scheduledFutureSpend,
+    remainingInventory,
+    inventorySpendCap,
+    cappedCostPerTicket,
+  };
 }
 
 export function calculateCostPerTicketFromSpend(
