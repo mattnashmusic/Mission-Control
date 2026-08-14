@@ -13,11 +13,12 @@ import {
   type EditableTourSettingField,
 } from "@/lib/tour-settings-client";
 import {
+  calculateCostPerTicketFromSpend,
   calculateDaysUntilShow,
   calculateForecastTickets,
   calculateOutlook,
   calculateProjectedSpend,
-  calculateTourWeeklyMomentum,
+  calculateShowWeeklyMomentum,
   type OutlookStatus,
 } from "@/lib/tour-outlook";
 
@@ -377,7 +378,7 @@ function calculateCostPerTicket(show: TourShow) {
 
   if (campaignTickets === 0) return 0;
 
-  return show.metaSpend / campaignTickets;
+  return calculateCostPerTicketFromSpend(show.metaSpend, campaignTickets);
 }
 
 function KpiCard({
@@ -699,15 +700,6 @@ export default function TourDashboardClient({
   }, [shows]);
 
   const today = useMemo(() => new Date(), []);
-  const tourWeeklyMomentum = useMemo(
-    () =>
-      calculateTourWeeklyMomentum(
-        shows.flatMap((show) => show.dailyTicketSales),
-        today
-      ),
-    [shows, today]
-  );
-
   function updateShow(
     showId: string,
     updater: (current: TourShow) => TourShow
@@ -899,10 +891,14 @@ export default function TourDashboardClient({
                   const revenue = calculateRevenue(show);
                   const profitLoss = calculateProfitLoss(show);
                   const capacity = show.capacity > 0 ? show.capacity : null;
+                  const showWeeklyMomentum = calculateShowWeeklyMomentum(
+                    show.dailyTicketSales,
+                    today
+                  );
                   const forecastTickets = calculateForecastTickets({
                     currentTickets: show.ticketSales,
                     capacity,
-                    weeklyMomentum: tourWeeklyMomentum,
+                    weeklyMomentum: showWeeklyMomentum,
                     showDate: show.date,
                     today,
                   });
@@ -1042,13 +1038,23 @@ export default function TourDashboardClient({
                                     Future-performance outlook
                                   </h3>
                                   <dl className="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
-                                    <div className="flex justify-between gap-3"><dt className="text-zinc-400">Four-week tour momentum</dt><dd>{tourWeeklyMomentum === null ? "—" : `${tourWeeklyMomentum.toFixed(1)} tickets/week`}</dd></div>
+                                    <div className="flex justify-between gap-3"><dt className="text-zinc-400">Show momentum</dt><dd>{showWeeklyMomentum === null ? "—" : `${showWeeklyMomentum.toFixed(1)} tickets/week`}</dd></div>
                                     <div className="flex justify-between gap-3"><dt className="text-zinc-400">Current ticket sales</dt><dd>{show.ticketSales}</dd></div>
                                     <div className="flex justify-between gap-3"><dt className="text-zinc-400">Time remaining</dt><dd>{daysRemaining} days</dd></div>
                                     <div className="flex justify-between gap-3"><dt className="text-zinc-400">Current advertising spend</dt><dd>{money(show.metaSpend)}</dd></div>
                                     <div className="flex justify-between gap-3"><dt className="text-zinc-400">Current daily budget</dt><dd>{show.dailyAdBudget === null ? "—" : money(show.dailyAdBudget)}</dd></div>
                                     <div className="flex justify-between gap-3"><dt className="text-zinc-400">Projected additional spend</dt><dd>{additionalSpend === null ? "—" : money(additionalSpend)}</dd></div>
                                   </dl>
+                                  <p className="mt-4 text-sm text-zinc-400">
+                                    {showWeeklyMomentum === null
+                                      ? "Reliable show-level ticket history is unavailable for the previous 28 days."
+                                      : `Based on this show’s average of ${showWeeklyMomentum.toFixed(1)} tickets per week during the previous 28 days.`}
+                                  </p>
+                                  <p className="mt-2 text-sm text-zinc-400">
+                                    {projectedSpend === null || show.dailyAdBudget === null
+                                      ? "Projected spend is unavailable because no daily budget is saved."
+                                      : `${money(show.metaSpend)} spent + ${daysRemaining} days × ${money(show.dailyAdBudget)}/day = ${money(projectedSpend)} projected.`}
+                                  </p>
                                   <p className="mt-4 border-t border-zinc-800 pt-4 text-sm text-zinc-400">
                                     <span className="mr-2 text-zinc-200"><OutlookBadge status={outlook} /></span>
                                     {outlookReason}

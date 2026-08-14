@@ -11,7 +11,7 @@ function utcDateKey(value: Date) {
   return value.toISOString().slice(0, 10);
 }
 
-export function calculateTourWeeklyMomentum(
+export function calculateShowWeeklyMomentum(
   history: TicketHistoryPoint[],
   today: Date
 ): number | null {
@@ -94,4 +94,12 @@ export function calculateProjectedSpend({
 }): number | null {
   if (dailyBudget === null) return null;
   return currentSpend + dailyBudget * calculateDaysUntilShow(showDate, today);
+}
+
+export function calculateCostPerTicketFromSpend(
+  currentSpend: number,
+  campaignTickets: number
+): number {
+  if (campaignTickets === 0) return 0;
+  return currentSpend / campaignTickets;
 }
