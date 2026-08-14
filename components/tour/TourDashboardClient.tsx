@@ -12,6 +12,14 @@ import {
   saveTourSetting,
   type EditableTourSettingField,
 } from "@/lib/tour-settings-client";
+import {
+  calculateDaysUntilShow,
+  calculateForecastTickets,
+  calculateOutlook,
+  calculateProjectedSpend,
+  calculateTourWeeklyMomentum,
+  type OutlookStatus,
+} from "@/lib/tour-outlook";
 
 const META_CPT_START_DATE = "2026-06-15";
 
@@ -36,6 +44,7 @@ export type TourShow = {
   ticketRevenue: number;
   dailyTicketSales: DailyTicketSalesPoint[];
   metaSpend: number;
+  dailyAdBudget: number | null;
   notes?: string | null;
   costs: {
     venueHire: number;
@@ -66,6 +75,22 @@ function signedMoney(value: number) {
 
 function percent(value: number) {
   return `${value.toFixed(1)}%`;
+}
+
+const OUTLOOK_STYLES: Record<OutlookStatus, string> = {
+  green: "bg-emerald-400",
+  amber: "bg-amber-400",
+  red: "bg-rose-400",
+  grey: "bg-zinc-500",
+};
+
+function OutlookBadge({ status }: { status: OutlookStatus }) {
+  return (
+    <span className="inline-flex items-center justify-end gap-1.5 capitalize">
+      <span className={`h-2 w-2 rounded-full ${OUTLOOK_STYLES[status]}`} />
+      {status}
+    </span>
+  );
 }
 
 function formatDate(dateString: string) {
@@ -673,6 +698,16 @@ export default function TourDashboardClient({
       }));
   }, [shows]);
 
+  const today = useMemo(() => new Date(), []);
+  const tourWeeklyMomentum = useMemo(
+    () =>
+      calculateTourWeeklyMomentum(
+        shows.flatMap((show) => show.dailyTicketSales),
+        today
+      ),
+    [shows, today]
+  );
+
   function updateShow(
     showId: string,
     updater: (current: TourShow) => TourShow
@@ -689,7 +724,7 @@ export default function TourDashboardClient({
   async function persistField(
     showId: string,
     field: EditableShowField,
-    value: number
+    value: number | null
   ) {
     const key = getSaveKey(showId, field);
 
@@ -826,7 +861,7 @@ export default function TourDashboardClient({
 
         <DailyTicketSalesChart data={dailyTicketSales} />
 
-        <section className="rounded-3xl border border-zinc-800 bg-zinc-900/90 p-5">
+        <section className="min-w-0 rounded-3xl border border-zinc-800 bg-zinc-900/90 p-5">
           <div className="mb-4">
             <h2 className="text-2xl font-semibold text-white">Shows</h2>
             <p className="mt-1 text-sm text-zinc-400">
@@ -834,18 +869,21 @@ export default function TourDashboardClient({
             </p>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-zinc-800">
-            <table className="w-full text-left text-sm">
+          <div className="overflow-x-auto rounded-2xl border border-zinc-800">
+            <table className="min-w-[1450px] w-full text-left text-sm">
               <thead className="bg-zinc-800/70 text-zinc-300">
                 <tr>
                   <th className="px-4 py-3 font-medium">Date</th>
                   <th className="px-4 py-3 font-medium">City</th>
                   <th className="px-4 py-3 font-medium">Venue</th>
                   <th className="px-4 py-3 text-right font-medium">Tickets Sold</th>
-                  <th className="px-4 py-3 text-right font-medium">Revenue</th>
                   <th className="px-4 py-3 text-right font-medium">Capacity</th>
                   <th className="px-4 py-3 text-right font-medium">% Sold</th>
+                  <th className="px-4 py-3 text-right font-medium">Forecast</th>
+                  <th className="px-4 py-3 text-right font-medium">Outlook</th>
+                  <th className="px-4 py-3 text-right font-medium">Revenue</th>
                   <th className="px-4 py-3 text-right font-medium">Ad Spend</th>
+                  <th className="px-4 py-3 text-right font-medium">Projected Spend</th>
                   <th className="px-4 py-3 text-right font-medium">Cost / Ticket 15 Jun+</th>
                 </tr>
               </thead>
@@ -860,6 +898,38 @@ export default function TourDashboardClient({
                   const breakEvenTickets = calculateBreakEvenTickets(show);
                   const revenue = calculateRevenue(show);
                   const profitLoss = calculateProfitLoss(show);
+                  const capacity = show.capacity > 0 ? show.capacity : null;
+                  const forecastTickets = calculateForecastTickets({
+                    currentTickets: show.ticketSales,
+                    capacity,
+                    weeklyMomentum: tourWeeklyMomentum,
+                    showDate: show.date,
+                    today,
+                  });
+                  const outlook = calculateOutlook(forecastTickets, capacity);
+                  const forecastPercent =
+                    forecastTickets === null || capacity === null
+                      ? null
+                      : (forecastTickets / capacity) * 100;
+                  const daysRemaining = calculateDaysUntilShow(show.date, today);
+                  const projectedSpend = calculateProjectedSpend({
+                    currentSpend: show.metaSpend,
+                    dailyBudget: show.dailyAdBudget,
+                    showDate: show.date,
+                    today,
+                  });
+                  const additionalSpend =
+                    projectedSpend === null ? null : projectedSpend - show.metaSpend;
+                  const outlookReason =
+                    forecastPercent === null
+                      ? "Insufficient ticket history or capacity for an outlook."
+                      : `${forecastPercent.toFixed(1)}% forecast occupancy is ${
+                          outlook === "green"
+                            ? "at or above the 90% green threshold."
+                            : outlook === "amber"
+                              ? "within the 70–89.9% amber range."
+                              : "below the 70% red threshold."
+                        }`;
 
                   return (
                     <React.Fragment key={show.id}>
@@ -873,14 +943,25 @@ export default function TourDashboardClient({
                         <td className="px-4 py-4">{show.city}</td>
                         <td className="px-4 py-4 text-zinc-300">{show.venue}</td>
                         <td className="px-4 py-4 text-right">{show.ticketSales}</td>
-                        <td className="px-4 py-4 text-right font-medium text-emerald-400">
-                          {money(revenue)}
-                        </td>
                         <td className="px-4 py-4 text-right text-zinc-400">
                           {show.capacity}
                         </td>
                         <td className="px-4 py-4 text-right">{percent(percentSold)}</td>
+                        <td className="whitespace-nowrap px-4 py-4 text-right">
+                          {forecastTickets === null || forecastPercent === null
+                            ? "—"
+                            : `${forecastTickets} / ${capacity} · ${Math.round(forecastPercent)}%`}
+                        </td>
+                        <td className="px-4 py-4 text-right">
+                          <OutlookBadge status={outlook} />
+                        </td>
+                        <td className="px-4 py-4 text-right font-medium text-emerald-400">
+                          {money(revenue)}
+                        </td>
                         <td className="px-4 py-4 text-right">{money(show.metaSpend)}</td>
+                        <td className="px-4 py-4 text-right">
+                          {projectedSpend === null ? "—" : money(projectedSpend)}
+                        </td>
                         <td className="px-4 py-4 text-right">
                           {campaignTickets === 0 ? "—" : money(costPerTicket)}
                         </td>
@@ -888,7 +969,7 @@ export default function TourDashboardClient({
 
                       {isExpanded ? (
                         <tr className="border-t border-zinc-800 bg-zinc-950/50">
-                          <td colSpan={9} className="px-5 py-5">
+                          <td colSpan={12} className="px-5 py-5">
                             <div className="grid gap-5 xl:grid-cols-[1.3fr_1fr]">
                               <div className="space-y-5">
                                 <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
@@ -954,6 +1035,24 @@ export default function TourDashboardClient({
                                       Notes: {show.notes}
                                     </p>
                                   ) : null}
+                                </div>
+
+                                <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
+                                  <h3 className="text-lg font-semibold text-white">
+                                    Future-performance outlook
+                                  </h3>
+                                  <dl className="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+                                    <div className="flex justify-between gap-3"><dt className="text-zinc-400">Four-week tour momentum</dt><dd>{tourWeeklyMomentum === null ? "—" : `${tourWeeklyMomentum.toFixed(1)} tickets/week`}</dd></div>
+                                    <div className="flex justify-between gap-3"><dt className="text-zinc-400">Current ticket sales</dt><dd>{show.ticketSales}</dd></div>
+                                    <div className="flex justify-between gap-3"><dt className="text-zinc-400">Time remaining</dt><dd>{daysRemaining} days</dd></div>
+                                    <div className="flex justify-between gap-3"><dt className="text-zinc-400">Current advertising spend</dt><dd>{money(show.metaSpend)}</dd></div>
+                                    <div className="flex justify-between gap-3"><dt className="text-zinc-400">Current daily budget</dt><dd>{show.dailyAdBudget === null ? "—" : money(show.dailyAdBudget)}</dd></div>
+                                    <div className="flex justify-between gap-3"><dt className="text-zinc-400">Projected additional spend</dt><dd>{additionalSpend === null ? "—" : money(additionalSpend)}</dd></div>
+                                  </dl>
+                                  <p className="mt-4 border-t border-zinc-800 pt-4 text-sm text-zinc-400">
+                                    <span className="mr-2 text-zinc-200"><OutlookBadge status={outlook} /></span>
+                                    {outlookReason}
+                                  </p>
                                 </div>
 
                                 <WeeklySalesProgressCard show={show} />
@@ -1066,6 +1165,31 @@ export default function TourDashboardClient({
                                       className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
                                     />
                                     {renderSaveStatus(show.id, "metaSpend")}
+                                  </label>
+
+                                  <label className="grid gap-2">
+                                    <span className="text-sm text-zinc-400">Daily Ad Budget</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={show.dailyAdBudget ?? ""}
+                                      placeholder="Not set"
+                                      onChange={(e) =>
+                                        updateShow(show.id, (current) => ({
+                                          ...current,
+                                          dailyAdBudget: e.target.value === "" ? null : Number(e.target.value),
+                                        }))
+                                      }
+                                      onBlur={(e) =>
+                                        persistField(
+                                          show.id,
+                                          "dailyAdBudget",
+                                          e.target.value === "" ? null : Number(e.target.value)
+                                        )
+                                      }
+                                      className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
+                                    />
+                                    {renderSaveStatus(show.id, "dailyAdBudget")}
                                   </label>
 
                                   <label className="grid gap-2">

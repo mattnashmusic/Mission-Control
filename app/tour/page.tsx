@@ -74,6 +74,7 @@ export default async function TourPage() {
           ? estimatedDailyTicketSales
           : eventbriteStats?.dailyTicketSales ?? [],
         metaSpend: liveMetaSpend,
+        dailyAdBudget: show.dailyAdBudget,
         notes: show.notes,
         costs: {
           venueHire: show.venueHire,

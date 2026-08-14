@@ -3,6 +3,7 @@ export type EditableShowField =
   | "ticketPrice"
   | "ticketSales"
   | "metaSpend"
+  | "dailyAdBudget"
   | "venueHire"
   | "production"
   | "hotelPetrolMisc";
@@ -10,7 +11,7 @@ export type EditableShowField =
 export async function saveShowField(
   id: string,
   field: EditableShowField,
-  value: number
+  value: number | null
 ) {
   const res = await fetch("/api/shows", {
     method: "PATCH",

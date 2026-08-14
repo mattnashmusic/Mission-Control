@@ -7,6 +7,7 @@ type PatchBody = {
   ticketPrice?: number;
   ticketSales?: number;
   metaSpend?: number;
+  dailyAdBudget?: number | null;
   venueHire?: number;
   production?: number;
   hotelPetrolMisc?: number;
@@ -17,13 +18,15 @@ const ALLOWED_FIELDS = new Set([
   "ticketPrice",
   "ticketSales",
   "metaSpend",
+  "dailyAdBudget",
   "venueHire",
   "production",
   "hotelPetrolMisc",
 ]);
 
 function parseNumber(value: unknown) {
-  if (value === undefined || value === null || value === "") return undefined;
+  if (value === undefined || value === "") return undefined;
+  if (value === null) return null;
 
   const num = Number(value);
   if (Number.isNaN(num)) return undefined;
@@ -39,7 +42,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Missing show id." }, { status: 400 });
     }
 
-    const data: Record<string, number> = {};
+    const data: Record<string, number | null> = {};
 
     for (const [key, value] of Object.entries(body)) {
       if (!ALLOWED_FIELDS.has(key)) continue;

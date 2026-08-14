@@ -17,10 +17,11 @@ model Show {
   venue   String
   notes   String?
 
-  capacity    Int
-  ticketPrice Float
-  ticketSales Int   @default(0)
-  metaSpend   Float @default(0)
+  capacity      Int
+  ticketPrice   Float
+  ticketSales   Int    @default(0)
+  metaSpend     Float  @default(0)
+  dailyAdBudget Float?
 
   venueHire       Float @default(0)
   production      Float @default(0)
