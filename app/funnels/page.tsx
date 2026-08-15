@@ -3,6 +3,9 @@ import { getFunnelStatsForSection } from "@/lib/funnel-data";
 import { prisma } from "@/lib/prisma";
 import { TOUR_SHOW_PAGE_SLUGS } from "@/lib/funnel-tour-pages";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function FunnelsPage() {
   const [releasePages, shows] = await Promise.all([
     prisma.releasePage.findMany({
