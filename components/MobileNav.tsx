@@ -2,7 +2,7 @@ import Link from "next/link";
 
 export default function MobileNav() {
   return (
-    <nav className="sticky top-0 z-50 grid grid-cols-3 gap-3 border-b border-[#222] bg-[#111]/95 px-4 py-3 backdrop-blur md:hidden">
+    <nav className="sticky top-0 z-50 grid grid-cols-4 gap-3 border-b border-[#222] bg-[#111]/95 px-4 py-3 backdrop-blur md:hidden">
       <Link
         href="/"
         aria-label="Home"
@@ -25,6 +25,14 @@ export default function MobileNav() {
         className="flex h-12 items-center justify-center rounded-xl border border-[#333] bg-[#181818] text-2xl"
       >
         🌍
+      </Link>
+
+      <Link
+        href="/funnels"
+        aria-label="Funnels"
+        className="flex h-12 items-center justify-center rounded-xl border border-[#333] bg-[#181818] text-2xl"
+      >
+        🔻
       </Link>
     </nav>
   );

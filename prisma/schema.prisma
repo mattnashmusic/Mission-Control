@@ -182,6 +182,26 @@ model CogsCostEntry {
   @@index([effectiveFrom])
 }
 
+model ReleasePage {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String
+  path      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model FunnelPageEvent {
+  id        String   @id @default(cuid())
+  section   String
+  pageSlug  String
+  eventType String
+  createdAt DateTime @default(now())
+
+  @@index([section, pageSlug, eventType, createdAt])
+}
+
 model ShippingCostEntry {
   id               String   @id @default(cuid())
   countryCode      String
