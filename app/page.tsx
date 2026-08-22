@@ -3,16 +3,13 @@ import { prisma } from "@/lib/prisma";
 import { getMetaSnapshot } from "@/lib/meta";
 import { calculateShippingCost } from "@/utils/shipping";
 import { getProductCost } from "@/utils/cogs";
+import { getShowsTicketSales } from "@/lib/tour-ticket-sales";
+import { getMergedAudience } from "@/lib/email/mergedAudience";
 
 const TIME_ZONE = "Europe/Amsterdam";
 const PROCESSING_FEE_RATE = 0.029;
 const PROCESSING_FIXED_FEE = 0.3;
 const FSH_START_DATE = "2026-02-12";
-
-// Tour placeholder stats for now
-const NEXT_TOUR_DATE = "2026-11-20";
-const UPCOMING_SHOWS = 8;
-const TICKETS_SOLD = 563;
 
 type DbDashboardOrder = {
   id: string;
@@ -338,6 +335,21 @@ export default async function Home() {
     metaSpendToday = 0;
   }
 
+  let showTicketSummaries: Awaited<ReturnType<typeof getShowsTicketSales>> = [];
+  try {
+    showTicketSummaries = await getShowsTicketSales();
+  } catch {
+    showTicketSummaries = [];
+  }
+
+  let totalContacts = 0;
+  try {
+    const merged = await getMergedAudience();
+    totalContacts = merged.allRows.length;
+  } catch {
+    totalContacts = 0;
+  }
+
   const todayOrders = filterOrdersByDateKeys(orders, buildRecentDateKeySet(1));
 
   const todayRevenue = calculateRevenue(todayOrders);
@@ -363,9 +375,13 @@ export default async function Home() {
     customers,
     buildRecentDateKeySet(30)
   ).length;
-  const emailTotal = filterCustomersSince(customers, fshStartDate).length;
+  // "Collected today / 30-day / avg per day" stay Shopify-only, since that's
+  // the one signal with a reliably organic signup date. MailerLite's
+  // subscriber date can reflect a later bulk group import rather than when
+  // someone actually joined, which would make a trend metric misleading.
+  const emailSinceLaunch = filterCustomersSince(customers, fshStartDate).length;
   const daysRunning = daysBetweenInclusive(fshStartDate, new Date());
-  const avgEmailsPerDay = daysRunning > 0 ? emailTotal / daysRunning : 0;
+  const avgEmailsPerDay = daysRunning > 0 ? emailSinceLaunch / daysRunning : 0;
 
   const tourVotesToday = filterTourVotesByDateKeys(
     tourVotes,
@@ -374,9 +390,24 @@ export default async function Home() {
   const totalTourVotes = tourVotes.length;
   const topTourVoteCity = getTopCity(tourVotes);
 
-  const daysToNextTour = daysUntil(NEXT_TOUR_DATE);
+  const now = new Date();
+  const upcomingShowSummaries = showTicketSummaries.filter(
+    (show) => startOfDay(show.date).getTime() >= startOfDay(now).getTime()
+  );
+  const nextShow = upcomingShowSummaries[0] ?? null;
+  const daysToNextTour = nextShow ? daysUntil(nextShow.date.toISOString()) : null;
+  const totalTicketsSold = showTicketSummaries.reduce(
+    (sum, show) => sum + show.ticketSales,
+    0
+  );
+  const ticketsSoldToday = showTicketSummaries.reduce(
+    (sum, show) => sum + show.ticketSalesToday,
+    0
+  );
   const avgTicketsPerShow =
-    UPCOMING_SHOWS > 0 ? TICKETS_SOLD / UPCOMING_SHOWS : 0;
+    showTicketSummaries.length > 0
+      ? totalTicketsSold / showTicketSummaries.length
+      : 0;
 
   return (
     <main className="min-h-screen bg-zinc-950 text-white">
@@ -431,7 +462,7 @@ export default async function Home() {
             stats={[
               {
                 label: "Total Contacts",
-                value: String(emailTotal),
+                value: String(totalContacts),
               },
               {
                 label: "Collected Today",
@@ -456,15 +487,15 @@ export default async function Home() {
             stats={[
               {
                 label: "Days till next tour",
-                value: String(daysToNextTour),
+                value: daysToNextTour === null ? "—" : String(daysToNextTour),
               },
               {
-                label: "Upcoming Shows",
-                value: String(UPCOMING_SHOWS),
+                label: "Tix Sold Today",
+                value: String(ticketsSoldToday),
               },
               {
                 label: "Tix Sold",
-                value: String(TICKETS_SOLD),
+                value: String(totalTicketsSold),
               },
               {
                 label: "Avg / Show",
