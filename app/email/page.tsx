@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import FanMap from "@/components/email/FanMap";
 import { getAudienceInRadius, type CityCluster } from "@/lib/email/audience";
 import {
@@ -10,18 +10,10 @@ import {
   type SavedAudience,
 } from "@/lib/email/savedAudiences";
 
-const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
-  Amsterdam: { lat: 52.3676, lng: 4.9041 },
-  Berlin: { lat: 52.52, lng: 13.405 },
-  Brussels: { lat: 50.8503, lng: 4.3517 },
-  Cologne: { lat: 50.9375, lng: 6.9603 },
-  Hamburg: { lat: 53.5511, lng: 9.9937 },
-  London: { lat: 51.5072, lng: -0.1276 },
-  Munich: { lat: 48.1351, lng: 11.582 },
-  Paris: { lat: 48.8566, lng: 2.3522 },
-  Utrecht: { lat: 52.0907, lng: 5.1214 },
-  Zurich: { lat: 47.3769, lng: 8.5417 },
-};
+// Sane fallback until either an upcoming show or a saved audience sets a
+// real location. Berlin, matching the tab's old default.
+const DEFAULT_CENTER = { lat: 52.52, lng: 13.405 };
+const DEFAULT_LABEL = "Berlin, Germany";
 
 type AudienceApiResponse = {
   clusters?: (CityCluster & {
@@ -45,17 +37,78 @@ type AudienceApiResponse = {
   };
 };
 
+type UpcomingShow = {
+  id: string;
+  slug: string;
+  date: string;
+  city: string;
+  country: string;
+  venue: string;
+  lat: number;
+  lng: number;
+};
+
+type GeocodeMatch = {
+  lat: number;
+  lng: number;
+  placeName: string;
+  city: string;
+  country: string;
+};
+
+type Location = {
+  lat: number;
+  lng: number;
+  label: string;
+  city: string;
+  country: string | null;
+};
+
 export default function EmailPage() {
-  const [selectedCity, setSelectedCity] = useState("Berlin");
   const [radiusKm, setRadiusKm] = useState(100);
+  const [location, setLocation] = useState<Location>({
+    ...DEFAULT_CENTER,
+    label: DEFAULT_LABEL,
+    city: "Berlin",
+    country: "Germany",
+  });
+  const [selectedShowId, setSelectedShowId] = useState<string | null>(null);
+
   const [data, setData] = useState<AudienceApiResponse | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [creatingGroup, setCreatingGroup] = useState(false);
+
+  const [upcomingShows, setUpcomingShows] = useState<UpcomingShow[]>([]);
+  const [showsLoading, setShowsLoading] = useState(true);
+  const [showsError, setShowsError] = useState("");
+  const hasAutoSelectedShow = useRef(false);
+
+  const [citySearchQuery, setCitySearchQuery] = useState("");
+  const [citySearchResults, setCitySearchResults] = useState<GeocodeMatch[]>([]);
+  const [citySearchOpen, setCitySearchOpen] = useState(false);
+  const [citySearching, setCitySearching] = useState(false);
+
   const [savedAudiences, setSavedAudiences] = useState<SavedAudience[]>([]);
+  const [savedLoading, setSavedLoading] = useState(true);
+  const [savingAudience, setSavingAudience] = useState(false);
 
   useEffect(() => {
-    setSavedAudiences(getSavedAudiences());
+    let cancelled = false;
+
+    async function loadSaved() {
+      try {
+        const audiences = await getSavedAudiences();
+        if (!cancelled) setSavedAudiences(audiences);
+      } finally {
+        if (!cancelled) setSavedLoading(false);
+      }
+    }
+
+    loadSaved();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -100,17 +153,147 @@ export default function EmailPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadShows() {
+      try {
+        setShowsLoading(true);
+        setShowsError("");
+
+        const response = await fetch("/api/email/shows", { cache: "no-store" });
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || "Failed to load upcoming shows");
+        }
+
+        const json = await response.json();
+        const shows: UpcomingShow[] = json.shows ?? [];
+
+        if (!cancelled) {
+          setUpcomingShows(shows);
+
+          if (shows.length > 0 && !hasAutoSelectedShow.current) {
+            hasAutoSelectedShow.current = true;
+            selectShow(shows[0]);
+          }
+        }
+      } catch (err) {
+        // Non-fatal — search and saved audiences still work without shows.
+        if (!cancelled) {
+          setShowsError(
+            err instanceof Error ? err.message : "Failed to load upcoming shows"
+          );
+        }
+      } finally {
+        if (!cancelled) setShowsLoading(false);
+      }
+    }
+
+    loadShows();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const query = citySearchQuery.trim();
+    if (!query) {
+      setCitySearchResults([]);
+      setCitySearching(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCitySearching(true);
+
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `/api/email/geocode?q=${encodeURIComponent(query)}`,
+          { cache: "no-store" }
+        );
+
+        if (!response.ok) throw new Error("Search failed");
+
+        const json = await response.json();
+        if (!cancelled) {
+          setCitySearchResults(json.matches ?? []);
+        }
+      } catch {
+        if (!cancelled) setCitySearchResults([]);
+      } finally {
+        if (!cancelled) setCitySearching(false);
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [citySearchQuery]);
+
   const cityClusters = data?.clusters ?? [];
   const stats = data?.stats ?? {};
   const totalSourceRows = stats.totalRows ?? stats.totalSourceRows ?? 0;
   const summary = useMemo(() => getAudienceSummaryFromClusters(cityClusters), [cityClusters]);
-  const center = CITY_COORDS[selectedCity];
 
   const radiusResult = useMemo(() => {
-    return getAudienceInRadius(cityClusters, center.lat, center.lng, radiusKm);
-  }, [cityClusters, center.lat, center.lng, radiusKm]);
+    return getAudienceInRadius(cityClusters, location.lat, location.lng, radiusKm);
+  }, [cityClusters, location.lat, location.lng, radiusKm]);
 
   const topSelectedCities = radiusResult.clusters.slice(0, 8);
+
+  const mailerLiteCount = useMemo(
+    () =>
+      radiusResult.clusters.reduce(
+        (sum, cluster: any) => sum + (cluster.mailerLiteEmails?.length ?? 0),
+        0
+      ),
+    [radiusResult.clusters]
+  );
+  const shopifyOnlyCount = Math.max(radiusResult.totalContacts - mailerLiteCount, 0);
+
+  // Audience size per upcoming show, at the currently selected radius, so
+  // each show chip can answer "how big is my audience there" at a glance.
+  const showAudienceCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const show of upcomingShows) {
+      const result = getAudienceInRadius(cityClusters, show.lat, show.lng, radiusKm);
+      map.set(show.id, result.totalContacts);
+    }
+    return map;
+  }, [upcomingShows, cityClusters, radiusKm]);
+
+  function selectShow(show: UpcomingShow) {
+    setSelectedShowId(show.id);
+    setLocation({
+      lat: show.lat,
+      lng: show.lng,
+      label: `${show.city}, ${show.country}`,
+      city: show.city,
+      country: show.country,
+    });
+    setCitySearchQuery("");
+    setCitySearchResults([]);
+    setCitySearchOpen(false);
+  }
+
+  function selectSearchMatch(match: GeocodeMatch) {
+    setSelectedShowId(null);
+    setLocation({
+      lat: match.lat,
+      lng: match.lng,
+      label: match.country ? `${match.city}, ${match.country}` : match.city || match.placeName,
+      city: match.city || match.placeName,
+      country: match.country || null,
+    });
+    setCitySearchQuery("");
+    setCitySearchResults([]);
+    setCitySearchOpen(false);
+  }
 
   async function handleCreateGroup() {
     try {
@@ -126,7 +309,7 @@ export default function EmailPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          name: `${selectedCity} ${radiusKm}km`,
+          name: `${location.label} ${radiusKm}km`,
           emails,
         }),
       });
@@ -147,27 +330,50 @@ export default function EmailPage() {
     }
   }
 
-  function handleSaveAudience() {
-    const newAudience: SavedAudience = {
-      id: crypto.randomUUID(),
-      name: `${selectedCity} ${radiusKm}km`,
-      city: selectedCity,
-      radiusKm,
-      createdAt: Date.now(),
-    };
+  async function handleSaveAudience() {
+    try {
+      setSavingAudience(true);
 
-    saveAudience(newAudience);
-    setSavedAudiences(getSavedAudiences());
+      const created = await saveAudience({
+        name: `${location.label} ${radiusKm}km`,
+        city: location.city,
+        country: location.country,
+        lat: location.lat,
+        lng: location.lng,
+        radiusKm,
+        showId: selectedShowId,
+      });
+
+      setSavedAudiences((prev) => [created, ...prev]);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to save audience");
+    } finally {
+      setSavingAudience(false);
+    }
   }
 
   function handleLoadAudience(audience: SavedAudience) {
-    setSelectedCity(audience.city);
+    setSelectedShowId(audience.showId);
+    setLocation({
+      lat: audience.lat,
+      lng: audience.lng,
+      label: audience.country ? `${audience.city}, ${audience.country}` : audience.city,
+      city: audience.city,
+      country: audience.country,
+    });
     setRadiusKm(audience.radiusKm);
   }
 
-  function handleDeleteAudience(id: string) {
-    deleteAudience(id);
-    setSavedAudiences(getSavedAudiences());
+  async function handleDeleteAudience(id: string) {
+    const previous = savedAudiences;
+    setSavedAudiences((prev) => prev.filter((audience) => audience.id !== id));
+
+    try {
+      await deleteAudience(id);
+    } catch (err) {
+      setSavedAudiences(previous);
+      alert(err instanceof Error ? err.message : "Failed to delete audience");
+    }
   }
 
   return (
@@ -207,29 +413,98 @@ export default function EmailPage() {
         />
       </section>
 
+      {upcomingShows.length > 0 && (
+        <section className="rounded-3xl border border-[#262626] bg-[#111] p-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Upcoming Shows</h2>
+              <p className="mt-1 text-sm text-gray-400">
+                Pulled from your tour dates. Pick a show to center the map and radius on it.
+              </p>
+            </div>
+            {showsLoading && <span className="text-xs text-gray-500">Loading…</span>}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {upcomingShows.map((show) => {
+              const isSelected = selectedShowId === show.id;
+              const count = showAudienceCounts.get(show.id) ?? 0;
+
+              return (
+                <button
+                  key={show.id}
+                  onClick={() => selectShow(show)}
+                  className={`flex flex-col items-start rounded-2xl border px-4 py-2.5 text-left transition ${
+                    isSelected
+                      ? "border-[#f0c94c] bg-[#2b2208]"
+                      : "border-[#343434] bg-[#161616] hover:border-[#4a4a4a]"
+                  }`}
+                >
+                  <span className={`text-sm font-semibold ${isSelected ? "text-[#f0c94c]" : "text-white"}`}>
+                    {show.city}, {show.country}
+                  </span>
+                  <span className="mt-0.5 text-xs text-gray-500">
+                    {formatShowDate(show.date)} · {show.venue}
+                  </span>
+                  <span className="mt-1 text-xs text-gray-400">
+                    {count.toLocaleString()} contact{count === 1 ? "" : "s"} within {radiusKm} km
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+      {showsError && (
+        <p className="text-xs text-red-400">Couldn&apos;t load upcoming shows: {showsError}</p>
+      )}
+
       <section className="overflow-hidden rounded-3xl border border-[#262626] bg-[#111]">
         <div className="border-b border-[#202020] px-5 py-4">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div>
               <h2 className="text-xl font-semibold text-white">Audience Map</h2>
               <p className="mt-1 text-sm text-gray-400">
-                Choose a city and radius to see who is nearby.
+                Search any city and radius to see who is nearby.
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap items-end gap-3">
               <ControlField label="City">
-                <select
-                  value={selectedCity}
-                  onChange={(e) => setSelectedCity(e.target.value)}
-                  className="min-w-[140px] rounded-xl border border-[#343434] bg-[#161616] px-3 py-2 text-sm text-white outline-none transition hover:border-[#4a4a4a]"
-                >
-                  {Object.keys(CITY_COORDS).map((city) => (
-                    <option key={city} value={city}>
-                      {city}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={citySearchQuery}
+                    onChange={(e) => {
+                      setCitySearchQuery(e.target.value);
+                      setCitySearchOpen(true);
+                    }}
+                    onFocus={() => setCitySearchOpen(true)}
+                    onBlur={() => {
+                      setTimeout(() => setCitySearchOpen(false), 150);
+                    }}
+                    placeholder={location.label}
+                    className="w-[220px] rounded-xl border border-[#343434] bg-[#161616] px-3 py-2 text-sm text-white outline-none transition placeholder:text-gray-500 hover:border-[#4a4a4a] focus:border-[#f0c94c]"
+                  />
+
+                  {citySearchOpen && (citySearching || citySearchResults.length > 0) && (
+                    <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-[#343434] bg-[#161616] shadow-xl">
+                      {citySearching ? (
+                        <div className="px-3 py-2 text-xs text-gray-500">Searching…</div>
+                      ) : (
+                        citySearchResults.map((match, index) => (
+                          <button
+                            key={`${match.placeName}-${index}`}
+                            onMouseDown={() => selectSearchMatch(match)}
+                            className="block w-full px-3 py-2 text-left text-sm text-gray-200 transition hover:bg-[#232323]"
+                          >
+                            {match.placeName}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
               </ControlField>
 
               <ControlField label="Radius">
@@ -262,7 +537,7 @@ export default function EmailPage() {
             <>
               <FanMap
                 cityClusters={cityClusters}
-                center={center}
+                center={location}
                 radiusKm={radiusKm}
                 highlightedKeys={radiusResult.clusters.map(
                   (cluster) => `${cluster.city}-${cluster.country}`
@@ -278,7 +553,7 @@ export default function EmailPage() {
                     {radiusResult.totalContacts}
                   </p>
                   <p className="mt-2 text-sm text-gray-400">
-                    contacts within {radiusKm} km of {selectedCity}
+                    contacts within {radiusKm} km of {location.label}
                   </p>
                 </InfoCard>
 
@@ -326,12 +601,18 @@ export default function EmailPage() {
                     Create a MailerLite group from this radius selection.
                   </p>
                   <p className="mt-2 text-xs text-gray-500">
-                    {selectedCity} · {radiusKm} km · {radiusResult.totalContacts} contacts
+                    {location.label} · {radiusKm} km · {radiusResult.totalContacts} contacts
+                  </p>
+                  <p className="mt-1 text-xs text-gray-600">
+                    {mailerLiteCount} subscribed (will be emailed)
+                    {shopifyOnlyCount > 0
+                      ? ` · ${shopifyOnlyCount} Shopify-only (not subscribed, excluded)`
+                      : ""}
                   </p>
 
                   <button
                     onClick={handleCreateGroup}
-                    disabled={creatingGroup || radiusResult.totalContacts === 0}
+                    disabled={creatingGroup || mailerLiteCount === 0}
                     className="mt-5 inline-flex w-full items-center justify-center rounded-xl bg-[#f0c94c] px-4 py-3 text-sm font-semibold text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {creatingGroup ? "Creating group..." : "Create MailerLite Group"}
@@ -339,9 +620,10 @@ export default function EmailPage() {
 
                   <button
                     onClick={handleSaveAudience}
-                    className="mt-2 inline-flex w-full items-center justify-center rounded-xl border border-[#343434] px-4 py-3 text-sm font-semibold text-white transition hover:border-[#555]"
+                    disabled={savingAudience}
+                    className="mt-2 inline-flex w-full items-center justify-center rounded-xl border border-[#343434] px-4 py-3 text-sm font-semibold text-white transition hover:border-[#555] disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Save Audience
+                    {savingAudience ? "Saving..." : "Save Audience"}
                   </button>
                 </InfoCard>
               </div>
@@ -354,11 +636,15 @@ export default function EmailPage() {
         <div className="mb-4">
           <h3 className="text-lg font-semibold text-white">Saved Audiences</h3>
           <p className="mt-1 text-sm text-gray-400">
-            Save common radius selections so you can reload them instantly.
+            Save common radius selections so you can reload them instantly, on any device.
           </p>
         </div>
 
-        {savedAudiences.length === 0 ? (
+        {savedLoading ? (
+          <div className="rounded-2xl border border-[#262626] bg-[#111] p-4 text-sm text-gray-500">
+            Loading saved audiences…
+          </div>
+        ) : savedAudiences.length === 0 ? (
           <div className="rounded-2xl border border-[#262626] bg-[#111] p-4 text-sm text-gray-500">
             No saved audiences yet.
           </div>
@@ -464,6 +750,18 @@ function getAudienceSummaryFromClusters(cityClusters: (CityCluster & { emails?: 
       ? { country: topCountryEntry[0], count: topCountryEntry[1] }
       : null,
   };
+}
+
+function formatShowDate(iso: string) {
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
 }
 
 function ControlField({

@@ -202,6 +202,21 @@ model FunnelPageEvent {
   @@index([section, pageSlug, eventType, createdAt])
 }
 
+model SavedAudience {
+  id        String   @id @default(cuid())
+  name      String
+  city      String
+  country   String?
+  lat       Float
+  lng       Float
+  radiusKm  Int
+  showId    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
+}
+
 model ShippingCostEntry {
   id               String   @id @default(cuid())
   countryCode      String

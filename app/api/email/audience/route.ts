@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { calculateClusterShares } from "@/lib/email/audience";
+import { geocodeCity } from "@/lib/email/geocode";
 
 type RawRow = {
   email: string;
@@ -17,6 +18,8 @@ type GeocodedCluster = {
   lng: number;
   count: number;
   emails: string[];
+  mailerLiteEmails: string[];
+  shopifyOnlyEmails: string[];
 };
 
 type MailerLiteSubscriber = {
@@ -44,28 +47,6 @@ type ShopifyCustomerRow = {
   rawJson: unknown;
 };
 
-const geocodeCache = new Map<string, { lat: number; lng: number } | null>();
-
-const COUNTRY_NAME_TO_CODE: Record<string, string> = {
-  australia: "AU",
-  austria: "AT",
-  belgium: "BE",
-  canada: "CA",
-  france: "FR",
-  germany: "DE",
-  ireland: "IE",
-  italy: "IT",
-  netherlands: "NL",
-  spain: "ES",
-  switzerland: "CH",
-  "united kingdom": "GB",
-  uk: "GB",
-  "great britain": "GB",
-  england: "GB",
-  "united states": "US",
-  usa: "US",
-};
-
 export async function GET() {
   try {
     const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
@@ -84,23 +65,47 @@ export async function GET() {
 
     const grouped = new Map<
       string,
-      { city: string; country: string; count: number; emails: string[] }
+      {
+        city: string;
+        country: string;
+        count: number;
+        emails: string[];
+        mailerLiteEmails: string[];
+        shopifyOnlyEmails: string[];
+      }
     >();
 
     for (const row of merged.usableRows) {
       const key = `${row.city}__${row.country}`;
       const existing = grouped.get(key);
 
-      if (existing) {
-        existing.count += 1;
-        existing.emails.push(row.email);
+      const bucket =
+        existing ??
+        grouped
+          .set(key, {
+            city: row.city,
+            country: row.country,
+            count: 0,
+            emails: [],
+            mailerLiteEmails: [],
+            shopifyOnlyEmails: [],
+          })
+          .get(key)!;
+
+      bucket.count += 1;
+      bucket.emails.push(row.email);
+
+      // `row.source` here reflects where the *location* data ultimately
+      // came from after merging (see mergeAudienceRows), which is
+      // deliberately biased toward "mailerlite" whenever a contact is an
+      // actual MailerLite subscriber. That makes it a reliable signal for
+      // "is this person opted in to receive email" — Shopify-only rows are
+      // customers we have an address for but who were never subscribed,
+      // so they should never be silently imported into a MailerLite group.
+      if (row.source === "mailerlite") {
+        bucket.mailerLiteEmails.push(row.email);
       } else {
-        grouped.set(key, {
-          city: row.city,
-          country: row.country,
-          count: 1,
-          emails: [row.email],
-        });
+        bucket.shopifyOnlyEmails.push(row.email);
       }
     }
 
@@ -117,6 +122,8 @@ export async function GET() {
         lat: coords.lat,
         lng: coords.lng,
         emails: item.emails,
+        mailerLiteEmails: item.mailerLiteEmails,
+        shopifyOnlyEmails: item.shopifyOnlyEmails,
       };
     });
 
@@ -423,63 +430,6 @@ function getNextLinkFromHeader(linkHeader: string | null): string | null {
     }
   }
   return null;
-}
-
-async function geocodeCity(city: string, country: string, token: string) {
-  const cacheKey = `${city}__${country}`;
-  if (geocodeCache.has(cacheKey)) {
-    return geocodeCache.get(cacheKey) ?? null;
-  }
-
-  const countryCode = toCountryCode(country);
-  const q = `${city}, ${country}`;
-
-  const url = new URL("https://api.mapbox.com/search/geocode/v6/forward");
-  url.searchParams.set("q", q);
-  url.searchParams.set("types", "place");
-  url.searchParams.set("limit", "1");
-  url.searchParams.set("access_token", token);
-
-  if (countryCode) {
-    url.searchParams.set("country", countryCode);
-  }
-
-  const response = await fetch(url.toString(), {
-    headers: {
-      "Content-Type": "application/json",
-    },
-    cache: "force-cache",
-  });
-
-  if (!response.ok) {
-    geocodeCache.set(cacheKey, null);
-    return null;
-  }
-
-  const json = await response.json();
-  const feature = json.features?.[0];
-  const coordinates = feature?.geometry?.coordinates;
-
-  if (
-    !Array.isArray(coordinates) ||
-    typeof coordinates[0] !== "number" ||
-    typeof coordinates[1] !== "number"
-  ) {
-    geocodeCache.set(cacheKey, null);
-    return null;
-  }
-
-  const result = {
-    lng: coordinates[0],
-    lat: coordinates[1],
-  };
-
-  geocodeCache.set(cacheKey, result);
-  return result;
-}
-
-function toCountryCode(country: string) {
-  return COUNTRY_NAME_TO_CODE[country.toLowerCase()] || "";
 }
 
 async function mapWithConcurrency<T, R>(

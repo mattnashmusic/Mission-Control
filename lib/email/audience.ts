@@ -8,6 +8,8 @@ export type CityCluster = {
   count: number;
   shareOfAudience: number;
   emails?: string[];
+  mailerLiteEmails?: string[];
+  shopifyOnlyEmails?: string[];
 };
 
 export function getAudienceInRadius(
