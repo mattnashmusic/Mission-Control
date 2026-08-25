@@ -88,20 +88,27 @@ function percent(value: number) {
 
 const OUTLOOK_STYLES: Record<OutlookStatus, string> = {
   green: "bg-emerald-400",
-  amber: "bg-amber-400",
+  amber: "bg-orange-400",
   red: "bg-rose-400",
   grey: "bg-zinc-500",
+};
+
+const OUTLOOK_LABELS: Record<OutlookStatus, string> = {
+  green: "Green",
+  amber: "Orange",
+  red: "Red",
+  grey: "No data",
 };
 
 function OutlookBadge({ status }: { status: OutlookStatus }) {
   return (
     <span
       className="inline-flex items-center justify-end"
-      aria-label={`${status} outlook`}
-      title={`${status[0].toUpperCase()}${status.slice(1)} outlook`}
+      aria-label={`${OUTLOOK_LABELS[status]} outlook`}
+      title={`${OUTLOOK_LABELS[status]} outlook`}
     >
       <span className={`h-3 w-3 rounded-full ${OUTLOOK_STYLES[status]}`} />
-      <span className="sr-only">{status} outlook</span>
+      <span className="sr-only">{OUTLOOK_LABELS[status]} outlook</span>
     </span>
   );
 }
@@ -712,6 +719,82 @@ export default function TourDashboardClient({
   }, [shows]);
 
   const today = useMemo(() => new Date(), []);
+
+  const showsTableTotals = useMemo(() => {
+    const totalCapacity = shows.reduce((sum, show) => sum + show.capacity, 0);
+    const totalTicketsSold = shows.reduce((sum, show) => sum + show.ticketSales, 0);
+    const totalRevenue = shows.reduce((sum, show) => sum + calculateRevenue(show), 0);
+    const totalAdSpend = shows.reduce((sum, show) => sum + show.metaSpend, 0);
+    const totalCampaignTickets = shows.reduce(
+      (sum, show) => sum + calculateCampaignTickets(show),
+      0
+    );
+
+    let totalForecastTickets = 0;
+    let hasForecast = false;
+    let totalProjectedSpend = 0;
+
+    shows.forEach((show) => {
+      const capacity = show.capacity > 0 ? show.capacity : null;
+      const showWeeklyMomentum = calculateShowWeeklyMomentum(
+        show.dailyTicketSales,
+        today
+      );
+      const forecastTickets = calculateForecastTickets({
+        currentTickets: show.ticketSales,
+        capacity,
+        weeklyMomentum: showWeeklyMomentum,
+        showDate: show.date,
+        today,
+      });
+
+      if (forecastTickets !== null) {
+        hasForecast = true;
+        totalForecastTickets += forecastTickets;
+      } else {
+        totalForecastTickets += show.ticketSales;
+      }
+
+      const campaignTickets = calculateCampaignTickets(show);
+      const costPerTicket = calculateCostPerTicket(show);
+      const projectedSpendDetails = calculateProjectedSpendDetails({
+        currentSpend: show.metaSpend,
+        dailyBudget: show.projectionDailyBudget,
+        capacity,
+        ticketsSold: show.ticketSales,
+        costPerTicket: campaignTickets === 0 ? null : costPerTicket,
+        showDate: show.date,
+        today,
+      });
+
+      totalProjectedSpend += projectedSpendDetails?.projectedSpend ?? show.metaSpend;
+    });
+
+    const percentSold =
+      totalCapacity === 0 ? 0 : (totalTicketsSold / totalCapacity) * 100;
+    const forecastPercent =
+      totalCapacity === 0 ? null : (totalForecastTickets / totalCapacity) * 100;
+    const outlook = hasForecast
+      ? calculateOutlook(totalForecastTickets, totalCapacity === 0 ? null : totalCapacity)
+      : "grey";
+    const costPerTicket =
+      totalCampaignTickets === 0 ? 0 : totalAdSpend / totalCampaignTickets;
+
+    return {
+      totalCapacity,
+      totalTicketsSold,
+      totalRevenue,
+      totalAdSpend,
+      totalCampaignTickets,
+      totalForecastTickets,
+      totalProjectedSpend,
+      percentSold,
+      forecastPercent,
+      outlook,
+      costPerTicket,
+    };
+  }, [shows, today]);
+
   function updateShow(
     showId: string,
     updater: (current: TourShow) => TourShow
@@ -937,9 +1020,9 @@ export default function TourDashboardClient({
                       ? "Insufficient ticket history or capacity for an outlook."
                       : `${forecastPercent.toFixed(1)}% forecast occupancy is ${
                           outlook === "green"
-                            ? "at or above the 90% green threshold."
+                            ? "at or above the 80% green threshold."
                             : outlook === "amber"
-                              ? "within the 70–89.9% amber range."
+                              ? "within the 70–79.9% orange range."
                               : "below the 70% red threshold."
                         }`;
 
@@ -1355,6 +1438,46 @@ export default function TourDashboardClient({
                   );
                 })}
               </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-zinc-700 bg-zinc-800/60 font-semibold text-white">
+                  <td className="px-4 py-4" colSpan={3}>
+                    Tour total ({shows.length} show{shows.length === 1 ? "" : "s"})
+                  </td>
+                  <td className="px-4 py-4 text-right">
+                    {showsTableTotals.totalTicketsSold}
+                  </td>
+                  <td className="px-4 py-4 text-right text-zinc-300">
+                    {showsTableTotals.totalCapacity}
+                  </td>
+                  <td className="px-4 py-4 text-right">
+                    {percent(showsTableTotals.percentSold)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-4 text-right">
+                    {showsTableTotals.forecastPercent === null
+                      ? "—"
+                      : `${showsTableTotals.totalForecastTickets} - ${Math.round(
+                          showsTableTotals.forecastPercent
+                        )}%`}
+                  </td>
+                  <td className="px-4 py-4 text-right">
+                    <OutlookBadge status={showsTableTotals.outlook} />
+                  </td>
+                  <td className="px-4 py-4 text-right text-emerald-400">
+                    {money(showsTableTotals.totalRevenue)}
+                  </td>
+                  <td className="px-4 py-4 text-right">
+                    {money(showsTableTotals.totalAdSpend)}
+                  </td>
+                  <td className="px-4 py-4 text-right">
+                    {money(showsTableTotals.totalProjectedSpend)}
+                  </td>
+                  <td className="px-4 py-4 text-right">
+                    {showsTableTotals.totalCampaignTickets === 0
+                      ? "—"
+                      : money(showsTableTotals.costPerTicket)}
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </section>

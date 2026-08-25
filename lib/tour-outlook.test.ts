@@ -32,7 +32,8 @@ function forecastForShow(
 
 test("outlook thresholds include green, amber, red and grey", () => {
   assert.equal(calculateOutlook(90, 100), "green");
-  assert.equal(calculateOutlook(89, 100), "amber");
+  assert.equal(calculateOutlook(80, 100), "green");
+  assert.equal(calculateOutlook(79, 100), "amber");
   assert.equal(calculateOutlook(70, 100), "amber");
   assert.equal(calculateOutlook(69, 100), "red");
   assert.equal(calculateOutlook(null, 100), "grey");

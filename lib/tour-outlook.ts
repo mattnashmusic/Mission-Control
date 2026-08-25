@@ -76,7 +76,7 @@ export function calculateOutlook(
 ): OutlookStatus {
   if (forecastTickets === null || capacity === null || capacity <= 0) return "grey";
   const forecastPercent = (forecastTickets / capacity) * 100;
-  if (forecastPercent >= 90) return "green";
+  if (forecastPercent >= 80) return "green";
   if (forecastPercent >= 70) return "amber";
   return "red";
 }
