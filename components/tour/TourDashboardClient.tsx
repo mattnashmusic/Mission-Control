@@ -100,7 +100,28 @@ const OUTLOOK_LABELS: Record<OutlookStatus, string> = {
   grey: "No data",
 };
 
-function OutlookBadge({ status }: { status: OutlookStatus }) {
+function OutlookBadge({
+  status,
+  maxed = false,
+}: {
+  status: OutlookStatus;
+  maxed?: boolean;
+}) {
+  if (maxed && status === "green") {
+    return (
+      <span
+        className="inline-flex items-center justify-end"
+        aria-label="Sold out forecast"
+        title="Forecasted to sell out (100%+)"
+      >
+        <span className="text-base leading-none" aria-hidden="true">
+          🔥
+        </span>
+        <span className="sr-only">Sold out forecast</span>
+      </span>
+    );
+  }
+
   return (
     <span
       className="inline-flex items-center justify-end"
@@ -1048,7 +1069,13 @@ export default function TourDashboardClient({
                             : `${forecastTickets} - ${Math.round(forecastPercent)}%`}
                         </td>
                         <td className="px-4 py-4 text-right">
-                          <OutlookBadge status={outlook} />
+                          <OutlookBadge
+                            status={outlook}
+                            maxed={
+                              forecastPercent !== null &&
+                              Math.round(forecastPercent) >= 100
+                            }
+                          />
                         </td>
                         <td className="px-4 py-4 text-right font-medium text-emerald-400">
                           {money(revenue)}
@@ -1178,7 +1205,15 @@ export default function TourDashboardClient({
                                         : `${money(show.metaSpend)} spent + min(${money(projectedSpendDetails.scheduledFutureSpend)} scheduled, ${projectedSpendDetails.remainingInventory} tickets × ${money(projectedSpendDetails.cappedCostPerTicket)}) = ${money(projectedSpendDetails.projectedSpend)} projected.`}
                                   </p>
                                   <p className="mt-4 border-t border-zinc-800 pt-4 text-sm text-zinc-400">
-                                    <span className="mr-2 text-zinc-200"><OutlookBadge status={outlook} /></span>
+                                    <span className="mr-2 text-zinc-200">
+                                      <OutlookBadge
+                                        status={outlook}
+                                        maxed={
+                                          forecastPercent !== null &&
+                                          Math.round(forecastPercent) >= 100
+                                        }
+                                      />
+                                    </span>
                                     {outlookReason}
                                   </p>
                                 </div>
@@ -1460,7 +1495,13 @@ export default function TourDashboardClient({
                         )}%`}
                   </td>
                   <td className="px-4 py-4 text-right">
-                    <OutlookBadge status={showsTableTotals.outlook} />
+                    <OutlookBadge
+                      status={showsTableTotals.outlook}
+                      maxed={
+                        showsTableTotals.forecastPercent !== null &&
+                        Math.round(showsTableTotals.forecastPercent) >= 100
+                      }
+                    />
                   </td>
                   <td className="px-4 py-4 text-right text-emerald-400">
                     {money(showsTableTotals.totalRevenue)}
