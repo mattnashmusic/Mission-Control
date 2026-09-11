@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  combineTourMetaBudgets,
   convertMetaDailyBudget,
   deriveTourMetaBudget,
   resolveTourDailyBudget,
@@ -111,6 +112,39 @@ test("campaign-level budget is not copied onto a show", () => {
   });
   assert.equal(result.attributable, false);
   assert.equal(result.dailyBudget, null);
+});
+
+test("a show with no linked ad sets combines to unattributable", () => {
+  const combined = combineTourMetaBudgets([]);
+  assert.equal(combined.attributable, false);
+  assert.equal(combined.dailyBudget, null);
+});
+
+test("a show's multiple linked ad sets have their daily budgets summed", () => {
+  const base = derive([adSet("hamburg-base", "500")]);
+  const retargeting = derive([adSet("hamburg-rt", "300")]);
+  const combined = combineTourMetaBudgets([base, retargeting]);
+  assert.equal(combined.attributable, true);
+  assert.equal(combined.dailyBudget, 8);
+  assert.equal(combined.adSets.length, 2);
+});
+
+test("one unattributable linked ad set makes the whole show unattributable", () => {
+  const attributable = derive([adSet("attributable", "500")]);
+  const unattributable = deriveTourMetaBudget({
+    adSets: [{ ...adSet("shared"), daily_budget: undefined }],
+    campaignsById: {
+      "campaign-1": {
+        ...campaign,
+        daily_budget: "5000",
+        is_adset_budget_sharing_enabled: true,
+      },
+    },
+    accountCurrencyById: { "account-1": "EUR" },
+  });
+  const combined = combineTourMetaBudgets([attributable, unattributable]);
+  assert.equal(combined.attributable, false);
+  assert.equal(combined.dailyBudget, null);
 });
 
 test("live EUR Meta budget values are converted from minor units", () => {

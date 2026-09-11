@@ -3,6 +3,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  addShowMetaAdSet,
+  removeShowMetaAdSet,
   saveManualTicketSnapshot,
   saveShowField,
   type EditableShowField,
@@ -36,6 +38,12 @@ export type DailyTicketSalesPoint = {
   estimated?: boolean;
 };
 
+export type LinkedMetaAdSet = {
+  id: string;
+  adSetId: string;
+  label: string | null;
+};
+
 export type TourShow = {
   id: string;
   slug: string;
@@ -54,6 +62,7 @@ export type TourShow = {
   dailyBudgetSource: TourBudgetSource;
   dailyBudgetReason: string;
   matchedMetaAdSets: TourMetaAdSetBudget[];
+  linkedMetaAdSets: LinkedMetaAdSet[];
   notes?: string | null;
   costs: {
     venueHire: number;
@@ -653,6 +662,13 @@ export default function TourDashboardClient({
     plannedAdBudget: "idle",
     blendedCpt: "idle",
   });
+  const [adSetMappingOpen, setAdSetMappingOpen] = useState(false);
+  const [adSetDrafts, setAdSetDrafts] = useState<
+    Record<string, { adSetId: string; label: string }>
+  >({});
+  const [adSetSaveStates, setAdSetSaveStates] = useState<
+    Record<string, SaveState>
+  >({});
 
   useEffect(() => {
     setShows(initialShows);
@@ -938,6 +954,61 @@ export default function TourDashboardClient({
     }
 
     return <div className="text-xs text-transparent">.</div>;
+  }
+
+  function getAdSetDraft(showId: string) {
+    return adSetDrafts[showId] ?? { adSetId: "", label: "" };
+  }
+
+  function updateAdSetDraft(
+    showId: string,
+    field: "adSetId" | "label",
+    value: string
+  ) {
+    setAdSetDrafts((prev) => ({
+      ...prev,
+      [showId]: { ...getAdSetDraft(showId), [field]: value },
+    }));
+  }
+
+  async function handleAddAdSet(show: TourShow) {
+    const draft = getAdSetDraft(show.id);
+    const adSetId = draft.adSetId.trim();
+    if (!adSetId) return;
+
+    const key = `add:${show.id}`;
+
+    try {
+      setAdSetSaveStates((prev) => ({ ...prev, [key]: "saving" }));
+      await addShowMetaAdSet(show.id, adSetId, draft.label.trim() || null);
+      setAdSetSaveStates((prev) => ({ ...prev, [key]: "saved" }));
+      setAdSetDrafts((prev) => ({ ...prev, [show.id]: { adSetId: "", label: "" } }));
+      router.refresh();
+
+      setTimeout(() => {
+        setAdSetSaveStates((prev) => {
+          const next = { ...prev };
+          if (next[key] === "saved") delete next[key];
+          return next;
+        });
+      }, 1500);
+    } catch (error) {
+      console.error(error);
+      setAdSetSaveStates((prev) => ({ ...prev, [key]: "error" }));
+    }
+  }
+
+  async function handleRemoveAdSet(showId: string, linkId: string) {
+    const key = `remove:${linkId}`;
+
+    try {
+      setAdSetSaveStates((prev) => ({ ...prev, [key]: "saving" }));
+      await removeShowMetaAdSet(linkId);
+      router.refresh();
+    } catch (error) {
+      console.error(error);
+      setAdSetSaveStates((prev) => ({ ...prev, [key]: "error" }));
+    }
   }
 
   return (
@@ -1611,6 +1682,127 @@ export default function TourDashboardClient({
                   }
                 />
               </div>
+            </div>
+          ) : null}
+        </section>
+
+        <section className="mt-8 rounded-3xl border border-zinc-800 bg-zinc-900/90 p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-semibold text-white">Ad Set Mapping</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Link one or more Meta ad sets to each show. Spend and daily
+                budget are summed across every linked ad set — add a
+                retargeting set here once you spin one up for a show.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setAdSetMappingOpen((current) => !current)}
+              className="rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2 text-sm font-medium text-zinc-200 transition hover:border-zinc-500 hover:bg-zinc-900"
+            >
+              {adSetMappingOpen ? "Hide" : "Show"}
+            </button>
+          </div>
+
+          {adSetMappingOpen ? (
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {shows.map((show) => {
+                const draft = getAdSetDraft(show.id);
+                const addState = adSetSaveStates[`add:${show.id}`];
+
+                return (
+                  <div
+                    key={show.id}
+                    className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4"
+                  >
+                    <div className="mb-3">
+                      <div className="text-sm font-semibold text-white">
+                        {show.city}
+                      </div>
+                      <div className="text-xs text-zinc-500">{show.slug}</div>
+                    </div>
+
+                    <div className="mb-3 space-y-2">
+                      {show.linkedMetaAdSets.length === 0 ? (
+                        <div className="text-xs text-zinc-500">
+                          No ad sets linked yet.
+                        </div>
+                      ) : (
+                        show.linkedMetaAdSets.map((adSet) => {
+                          const removeState =
+                            adSetSaveStates[`remove:${adSet.id}`];
+
+                          return (
+                            <div
+                              key={adSet.id}
+                              className="flex items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2"
+                            >
+                              <div className="min-w-0">
+                                <div className="truncate text-sm text-zinc-200">
+                                  {adSet.label || adSet.adSetId}
+                                </div>
+                                {adSet.label ? (
+                                  <div className="truncate text-xs text-zinc-500">
+                                    {adSet.adSetId}
+                                  </div>
+                                ) : null}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleRemoveAdSet(show.id, adSet.id)
+                                }
+                                disabled={removeState === "saving"}
+                                className="shrink-0 rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-400 transition hover:border-rose-500 hover:text-rose-400 disabled:opacity-50"
+                              >
+                                {removeState === "saving"
+                                  ? "Removing..."
+                                  : "Remove"}
+                              </button>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <input
+                        type="text"
+                        value={draft.adSetId}
+                        onChange={(e) =>
+                          updateAdSetDraft(show.id, "adSetId", e.target.value)
+                        }
+                        placeholder="Meta ad set ID"
+                        className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-zinc-500"
+                      />
+                      <input
+                        type="text"
+                        value={draft.label}
+                        onChange={(e) =>
+                          updateAdSetDraft(show.id, "label", e.target.value)
+                        }
+                        placeholder="Label (optional)"
+                        className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-zinc-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleAddAdSet(show)}
+                        disabled={!draft.adSetId.trim() || addState === "saving"}
+                        className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm font-medium text-zinc-200 transition hover:border-zinc-500 disabled:opacity-50"
+                      >
+                        {addState === "saving" ? "Adding..." : "Add"}
+                      </button>
+                    </div>
+                    {addState === "error" ? (
+                      <div className="mt-2 text-xs text-rose-400">
+                        Failed to add ad set.
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
           ) : null}
         </section>

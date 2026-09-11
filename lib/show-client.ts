@@ -32,6 +32,44 @@ export async function saveShowField(
   return res.json();
 }
 
+export async function addShowMetaAdSet(
+  showId: string,
+  adSetId: string,
+  label?: string | null
+) {
+  const res = await fetch("/api/shows/meta-ad-sets", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ showId, adSetId, label }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to link ad set");
+  }
+
+  return res.json();
+}
+
+export async function removeShowMetaAdSet(id: string) {
+  const res = await fetch("/api/shows/meta-ad-sets", {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ id }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to unlink ad set");
+  }
+
+  return res.json();
+}
+
 export async function saveManualTicketSnapshot(
   showId: string,
   cumulativeTickets: number

@@ -339,3 +339,88 @@ export async function getTourMetaSnapshot(
     },
   };
 }
+
+const EMPTY_SNAPSHOT: TourMetaSnapshot = {
+  spend: { today: 0, lifetime: 0 },
+  clicks: { today: 0, lifetime: 0 },
+};
+
+/**
+ * Sums spend/clicks across every Meta ad set linked to a show. A show can
+ * now have more than one ad set (e.g. a base prospecting set plus a
+ * retargeting set added later), so this replaces the old single-ID lookup.
+ * One bad/paused ad set ID doesn't zero out the whole show - it's skipped
+ * and logged, and the rest still add up.
+ */
+export async function getTourMetaSnapshotForAdSets(
+  adSetIds: string[]
+): Promise<TourMetaSnapshot> {
+  if (adSetIds.length === 0) return EMPTY_SNAPSHOT;
+
+  const results = await Promise.allSettled(
+    adSetIds.map((id) => getTourMetaSnapshot(id))
+  );
+
+  return results.reduce<TourMetaSnapshot>((total, result) => {
+    if (result.status === "rejected") {
+      console.error("Failed to load Meta snapshot for linked ad set:", result.reason);
+      return total;
+    }
+
+    return {
+      spend: {
+        today: total.spend.today + result.value.spend.today,
+        lifetime: total.spend.lifetime + result.value.spend.lifetime,
+      },
+      clicks: {
+        today: total.clicks.today + result.value.clicks.today,
+        lifetime: total.clicks.lifetime + result.value.clicks.lifetime,
+      },
+    };
+  }, EMPTY_SNAPSHOT);
+}
+
+/**
+ * Combines the per-ad-set budget results for every ad set linked to one
+ * show into a single result, the same shape `resolveTourDailyBudget`
+ * already expects. Daily budgets are summed across attributable ad sets;
+ * if any linked ad set's budget can't be attributed (e.g. shared campaign
+ * budget), the whole show falls back rather than silently under-counting.
+ */
+export function combineTourMetaBudgets(
+  results: TourMetaBudgetResult[]
+): TourMetaBudgetResult {
+  if (results.length === 0) {
+    return {
+      dailyBudget: null,
+      attributable: false,
+      reason: "No Meta ad sets are linked to this show.",
+      adSets: [],
+    };
+  }
+
+  const adSets = results.flatMap((result) => result.adSets);
+  const unattributable = results.find((result) => !result.attributable);
+
+  if (unattributable) {
+    return {
+      dailyBudget: null,
+      attributable: false,
+      reason: unattributable.reason,
+      adSets,
+    };
+  }
+
+  const dailyBudget = results.reduce(
+    (total, result) => total + (result.dailyBudget ?? 0),
+    0
+  );
+  const activeCount = adSets.filter((adSet) => adSet.included).length;
+
+  return {
+    dailyBudget,
+    attributable: true,
+    reason: `${activeCount} active matched ad set${activeCount === 1 ? "" : "s"} across ${results.length} linked ad set${results.length === 1 ? "" : "s"}.`,
+    adSets,
+  };
+}

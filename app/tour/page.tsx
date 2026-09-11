@@ -3,13 +3,13 @@ import TourDashboardClient, {
 } from "@/components/tour/TourDashboardClient";
 import { getEventbriteShowStatsBySlug } from "@/lib/eventbrite";
 import {
+  combineTourMetaBudgets,
   getTourMetaBudgetsByAdSetId,
-  getTourMetaSnapshot,
+  getTourMetaSnapshotForAdSets,
   resolveTourDailyBudget,
   type TourMetaBudgetResult,
 } from "@/lib/meta-tour";
 import { prisma } from "@/lib/prisma";
-import { TOUR_META_CAMPAIGN_IDS_BY_SLUG } from "@/lib/tour-show-meta-campaigns";
 import {
   buildEstimatedDailyTicketSales,
   NIJMEGEN_SHOW_SLUG,
@@ -23,6 +23,9 @@ export default async function TourPage() {
         manualTicketSnapshots: {
           orderBy: { snapshotDate: "asc" },
         },
+        metaAdSets: {
+          orderBy: { createdAt: "asc" },
+        },
       },
     }),
     prisma.tourSettings.findUnique({
@@ -30,7 +33,9 @@ export default async function TourPage() {
     }),
   ]);
 
-  const mappedMetaAdSetIds = Object.values(TOUR_META_CAMPAIGN_IDS_BY_SLUG);
+  const mappedMetaAdSetIds = shows.flatMap((show) =>
+    show.metaAdSets.map((adSet) => adSet.adSetId)
+  );
   let metaBudgetsByAdSetId: Record<string, TourMetaBudgetResult> = {};
 
   try {
@@ -62,21 +67,32 @@ export default async function TourPage() {
         eventbriteStats?.ticketSales ??
         show.ticketSales;
 
-      const metaAdSetId = TOUR_META_CAMPAIGN_IDS_BY_SLUG[show.slug];
+      const metaAdSetIds = show.metaAdSets.map((adSet) => adSet.adSetId);
 
       let liveMetaSpend = show.metaSpend;
 
-      if (metaAdSetId) {
+      if (metaAdSetIds.length > 0) {
         try {
-          const metaSnapshot = await getTourMetaSnapshot(metaAdSetId);
+          const metaSnapshot = await getTourMetaSnapshotForAdSets(metaAdSetIds);
           liveMetaSpend = metaSnapshot.spend.lifetime;
         } catch (error) {
           console.error(`Failed to load Meta spend for ${show.slug}:`, error);
         }
       }
 
+      const combinedBudget =
+        metaAdSetIds.length > 0
+          ? combineTourMetaBudgets(
+              metaAdSetIds
+                .map((id) => metaBudgetsByAdSetId[id])
+                .filter((result): result is TourMetaBudgetResult =>
+                  Boolean(result)
+                )
+            )
+          : null;
+
       const resolvedDailyBudget = resolveTourDailyBudget(
-        metaAdSetId ? metaBudgetsByAdSetId[metaAdSetId] ?? null : null,
+        combinedBudget,
         show.dailyAdBudget
       );
 
@@ -101,6 +117,11 @@ export default async function TourPage() {
         dailyBudgetSource: resolvedDailyBudget.source,
         dailyBudgetReason: resolvedDailyBudget.reason,
         matchedMetaAdSets: resolvedDailyBudget.adSets,
+        linkedMetaAdSets: show.metaAdSets.map((adSet) => ({
+          id: adSet.id,
+          adSetId: adSet.adSetId,
+          label: adSet.label,
+        })),
         notes: show.notes,
         costs: {
           venueHire: show.venueHire,

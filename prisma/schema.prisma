@@ -28,9 +28,23 @@ model Show {
   hotelPetrolMisc Float @default(0)
 
   manualTicketSnapshots ManualTicketSnapshot[]
+  metaAdSets            ShowMetaAdSet[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model ShowMetaAdSet {
+  id        String   @id @default(cuid())
+  showId    String
+  adSetId   String
+  label     String?
+  createdAt DateTime @default(now())
+
+  show Show @relation(fields: [showId], references: [id], onDelete: Cascade)
+
+  @@unique([showId, adSetId])
+  @@index([showId])
 }
 
 model ManualTicketSnapshot {
