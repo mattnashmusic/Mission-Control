@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 const COST_ITEMS = [
   { itemKey: "cd1", itemName: "CD1", category: "Product" },
   { itemKey: "cd2", itemName: "CD2", category: "Product" },
+  { itemKey: "cd3", itemName: "CD3", category: "Product" },
   { itemKey: "vinyl", itemName: "Vinyl", category: "Product" },
   { itemKey: "cd_envelope", itemName: "CD Envelope", category: "Packaging" },
   { itemKey: "vinyl_box", itemName: "Vinyl Box", category: "Packaging" },

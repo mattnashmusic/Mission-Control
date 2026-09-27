@@ -9,6 +9,12 @@ import { getMetaSnapshot } from "@/lib/meta";
 import { calculateShippingCost } from "@/utils/shipping";
 import { getProductCost } from "@/utils/cogs";
 import { getStockSummaries } from "@/lib/stock";
+import {
+  CD_ITEM_KEYS,
+  FUNNEL_V2_START_DATE,
+  getProductItemKey,
+  normalizeText,
+} from "@/lib/products";
 import SyncButton from "@/components/SyncButton";
 import MetaBackfillButton from "@/components/MetaBackfillButton";
 
@@ -68,6 +74,7 @@ const LEGACY_PRODUCT_COSTS = {
 
 const PRODUCT_MATCHES = {
   cd2: ["rebirth cd deluxe"],
+  cd3: ["live in amsterdam"],
   vinyl: ["rebirth vinyl"],
   tips: ["tip"],
 };
@@ -234,27 +241,6 @@ function parseProductItems(productsSummary: string) {
     });
 }
 
-function getProductItemKey(productName: string) {
-  const name = normalizeText(productName);
-
-  if (
-    name.includes("rebirth cd deluxe") ||
-    name.includes("cd deluxe") ||
-    name.includes("deluxe cd")
-  ) {
-    return "cd2";
-  }
-
-  if (name.includes("rebirth vinyl") || name.includes("vinyl")) {
-    return "vinyl";
-  }
-
-  if (name.includes("rebirth cd") || name.includes("cd")) {
-    return "cd1";
-  }
-
-  return null;
-}
 
 function getLatestCogsRate(
   entries: CogsRateEntry[],
@@ -290,7 +276,7 @@ function calculateNewOrderCogs(
     productCost +=
       getLatestCogsRate(cogsEntries, itemKey, orderDate) * item.quantity;
 
-    if (itemKey === "cd1" || itemKey === "cd2") {
+    if (itemKey && CD_ITEM_KEYS.includes(itemKey)) {
       cdUnits += item.quantity;
     }
 
@@ -362,7 +348,7 @@ function calculateNewOrderShipping(
   for (const item of items) {
     const itemKey = getProductItemKey(item.productName);
 
-    if (itemKey === "cd1" || itemKey === "cd2") {
+    if (itemKey && CD_ITEM_KEYS.includes(itemKey)) {
       cdUnits += item.quantity;
     }
 
@@ -431,14 +417,6 @@ function calculatePreviousPeriodChange(current: number, previous: number) {
   return ((current - previous) / previous) * 100;
 }
 
-function normalizeText(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/["']/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 function orderHasAnyProductMatch(order: DashboardOrder, matches: string[]) {
   const products = normalizeText(order.products);
@@ -1119,6 +1097,12 @@ export default async function Home() {
     orderValues.today,
   );
 
+  const todayCd3Count = countOrdersWithAnyProductMatch(
+    todayOrders,
+    PRODUCT_MATCHES.cd3,
+  );
+  const todayCd3TakeRate = calculateTakeRate(todayCd3Count, orderValues.today);
+
   const todayTipsCount = countOrdersWithAnyProductMatch(
     todayOrders,
     PRODUCT_MATCHES.tips,
@@ -1221,6 +1205,25 @@ export default async function Home() {
     lifetimeVinylCount,
     orderValues.lifetime,
   );
+
+  // Funnel v2 take rates: every order since go-live (each order starts with
+  // CD1), no backfill.
+  const funnelV2Orders = lifetimeOrders.filter(
+    (order) => getDateKey(order.createdAt) >= FUNNEL_V2_START_DATE,
+  );
+  const funnelV2OrderCount = funnelV2Orders.length;
+  const funnelV2Rows = [
+    { label: "CD2", matches: PRODUCT_MATCHES.cd2 },
+    { label: "Vinyl", matches: PRODUCT_MATCHES.vinyl },
+    { label: "CD3", matches: PRODUCT_MATCHES.cd3 },
+  ].map(({ label, matches }) => {
+    const count = countOrdersWithAnyProductMatch(funnelV2Orders, matches);
+    return {
+      label,
+      count,
+      takeRate: calculateTakeRate(count, funnelV2OrderCount),
+    };
+  });
 
   const recentOrders = [...todayLiveOrders, ...historicalOrders].slice(0, 10);
   const firstNonTodayRecentOrderIndex = recentOrders.findIndex(
@@ -1374,6 +1377,10 @@ export default async function Home() {
               {
                 label: "Vinyl",
                 value: `${todayVinylCount} (${percent(todayVinylTakeRate)})`,
+              },
+              {
+                label: "CD3",
+                value: `${todayCd3Count} (${percent(todayCd3TakeRate)})`,
               },
               {
                 label: "Tips",
@@ -1647,6 +1654,26 @@ export default async function Home() {
             />
 
             <BottomStatCard label="Total Orders" value={orderValues.lifetime} />
+          </div>
+
+          <div className="mt-8">
+            <h3 className="text-lg font-semibold text-white">
+              Funnel Take Rates
+            </h3>
+            <p className="text-sm text-zinc-400">
+              Since {FUNNEL_V2_START_DATE} (CD1 → CD2 → Vinyl → CD3). Share of
+              all orders that took each upsell.
+            </p>
+            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <BottomStatCard label="Orders (CD1)" value={funnelV2OrderCount} />
+              {funnelV2Rows.map((row) => (
+                <BottomStatCard
+                  key={row.label}
+                  label={`${row.label} Take Rate`}
+                  value={`${percent(row.takeRate)} · ${row.count}`}
+                />
+              ))}
+            </div>
           </div>
         </section>
 

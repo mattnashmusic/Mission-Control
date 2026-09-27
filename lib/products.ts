@@ -1,8 +1,18 @@
-export type ProductItemKey = "cd1" | "cd2" | "vinyl";
+export type ProductItemKey = "cd1" | "cd2" | "cd3" | "vinyl";
+
+/** Physical CD products — used for shipping tier and packaging logic. */
+export const CD_ITEM_KEYS: ProductItemKey[] = ["cd1", "cd2", "cd3"];
+
+/**
+ * Funnel v2 (CD1 → CD2 → Vinyl → CD3) go-live. Take rates on the FSH page are
+ * measured from this date forward, with no backfill.
+ */
+export const FUNNEL_V2_START_DATE = "2026-09-27";
 
 export const PRODUCT_ITEMS: Array<{ itemKey: ProductItemKey; itemName: string }> = [
   { itemKey: "cd1", itemName: "CD1" },
   { itemKey: "cd2", itemName: "CD2" },
+  { itemKey: "cd3", itemName: "CD3" },
   { itemKey: "vinyl", itemName: "Vinyl" },
 ];
 
@@ -23,6 +33,11 @@ export function normalizeText(value: string) {
  */
 export function getProductItemKey(productName: string): ProductItemKey | null {
   const name = normalizeText(productName);
+
+  // CD3 = "Matt Nash Live In Amsterdam". Checked first; its title has no "cd".
+  if (name.includes("live in amsterdam")) {
+    return "cd3";
+  }
 
   if (
     name.includes("rebirth cd deluxe") ||

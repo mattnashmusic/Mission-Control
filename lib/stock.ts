@@ -13,6 +13,7 @@ const DEFAULT_LEAD_TIMES: Record<
 > = {
   cd1: { productionDays: 14, shippingDays: 7, bufferDays: 14 },
   cd2: { productionDays: 14, shippingDays: 7, bufferDays: 14 },
+  cd3: { productionDays: 14, shippingDays: 7, bufferDays: 14 },
   vinyl: { productionDays: 56, shippingDays: 7, bufferDays: 14 },
 };
 
@@ -60,7 +61,7 @@ async function getUnitsSoldByItemSince(
     select: { title: true, quantity: true },
   });
 
-  const totals: Record<ProductItemKey, number> = { cd1: 0, cd2: 0, vinyl: 0 };
+  const totals: Record<ProductItemKey, number> = { cd1: 0, cd2: 0, cd3: 0, vinyl: 0 };
 
   for (const item of lineItems) {
     const key = getProductItemKey(item.title);
