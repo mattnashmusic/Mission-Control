@@ -726,20 +726,27 @@ function BottomStatCard({
   label,
   value,
   valueClassName = "text-white",
+  detail,
 }: {
   label: string;
   value: string | number;
   valueClassName?: string;
+  detail?: string;
 }) {
   return (
     <div className="flex h-full min-h-[124px] flex-col justify-between rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4">
       <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
         {label}
       </p>
-      <p
-        className={`mt-4 text-2xl font-semibold tabular-nums ${valueClassName}`}
-      >
-        {value}
+      <p className="mt-4 flex items-baseline gap-2">
+        <span
+          className={`text-2xl font-semibold tabular-nums ${valueClassName}`}
+        >
+          {value}
+        </span>
+        {detail ? (
+          <span className="text-sm tabular-nums text-zinc-400">{detail}</span>
+        ) : null}
       </p>
     </div>
   );
@@ -1206,24 +1213,19 @@ export default async function Home() {
     orderValues.lifetime,
   );
 
-  // Funnel v2 take rates: every order since go-live (each order starts with
-  // CD1), no backfill.
+  // CD3 only exists from funnel v2 go-live, so its take rate is measured
+  // against orders since then (no backfill). CD2/Vinyl stay lifetime.
   const funnelV2Orders = lifetimeOrders.filter(
     (order) => getDateKey(order.createdAt) >= FUNNEL_V2_START_DATE,
   );
-  const funnelV2OrderCount = funnelV2Orders.length;
-  const funnelV2Rows = [
-    { label: "CD2", matches: PRODUCT_MATCHES.cd2 },
-    { label: "Vinyl", matches: PRODUCT_MATCHES.vinyl },
-    { label: "CD3", matches: PRODUCT_MATCHES.cd3 },
-  ].map(({ label, matches }) => {
-    const count = countOrdersWithAnyProductMatch(funnelV2Orders, matches);
-    return {
-      label,
-      count,
-      takeRate: calculateTakeRate(count, funnelV2OrderCount),
-    };
-  });
+  const cd3SinceLaunchCount = countOrdersWithAnyProductMatch(
+    funnelV2Orders,
+    PRODUCT_MATCHES.cd3,
+  );
+  const cd3SinceLaunchTakeRate = calculateTakeRate(
+    cd3SinceLaunchCount,
+    funnelV2Orders.length,
+  );
 
   const recentOrders = [...todayLiveOrders, ...historicalOrders].slice(0, 10);
   const firstNonTodayRecentOrderIndex = recentOrders.findIndex(
@@ -1617,7 +1619,32 @@ export default async function Home() {
             </table>
           </div>
 
-          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-7">
+          <div className="mt-5 grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+            <BottomStatCard label="Total Orders" value={orderValues.lifetime} />
+
+            <BottomStatCard
+              label="CD2 Upsell Takers"
+              value={lifetimeCd2Count}
+              detail={`${percent(lifetimeCd2TakeRate)} take rate`}
+            />
+
+            <BottomStatCard
+              label="Vinyl Upsell Takers"
+              value={lifetimeVinylCount}
+              detail={`${percent(lifetimeVinylTakeRate)} take rate`}
+            />
+
+            <BottomStatCard
+              label="CD3 Upsell Takers"
+              value={cd3SinceLaunchCount}
+              detail={`${percent(cd3SinceLaunchTakeRate)} take rate`}
+            />
+
+            <BottomStatCard
+              label="Total Products Sold"
+              value={totalProductsValues.lifetime}
+            />
+
             <BottomStatCard
               label="Lifetime Net Profit"
               value={signedMoney(netProfitValues.lifetime)}
@@ -1627,53 +1654,6 @@ export default async function Home() {
                   : "text-rose-400"
               }
             />
-
-            <BottomStatCard
-              label="CD2 Upsell Takers"
-              value={lifetimeCd2Count}
-            />
-
-            <BottomStatCard
-              label="CD2 Take Rate"
-              value={percent(lifetimeCd2TakeRate)}
-            />
-
-            <BottomStatCard
-              label="Vinyl Upsell Takers"
-              value={lifetimeVinylCount}
-            />
-
-            <BottomStatCard
-              label="Vinyl Take Rate"
-              value={percent(lifetimeVinylTakeRate)}
-            />
-
-            <BottomStatCard
-              label="Total Products Sold"
-              value={totalProductsValues.lifetime}
-            />
-
-            <BottomStatCard label="Total Orders" value={orderValues.lifetime} />
-          </div>
-
-          <div className="mt-8">
-            <h3 className="text-lg font-semibold text-white">
-              Funnel Take Rates
-            </h3>
-            <p className="text-sm text-zinc-400">
-              Since {FUNNEL_V2_START_DATE} (CD1 → CD2 → Vinyl → CD3). Share of
-              all orders that took each upsell.
-            </p>
-            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <BottomStatCard label="Orders (CD1)" value={funnelV2OrderCount} />
-              {funnelV2Rows.map((row) => (
-                <BottomStatCard
-                  key={row.label}
-                  label={`${row.label} Take Rate`}
-                  value={`${percent(row.takeRate)} · ${row.count}`}
-                />
-              ))}
-            </div>
           </div>
         </section>
 
