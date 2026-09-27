@@ -8,6 +8,7 @@ import {
 import { getMetaSnapshot } from "@/lib/meta";
 import { calculateShippingCost } from "@/utils/shipping";
 import { getProductCost } from "@/utils/cogs";
+import { getStockSummaries } from "@/lib/stock";
 import SyncButton from "@/components/SyncButton";
 import MetaBackfillButton from "@/components/MetaBackfillButton";
 
@@ -106,6 +107,15 @@ function formatLastSynced(date: Date | null) {
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
+  }).format(date);
+}
+
+function formatShortDate(date: Date) {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: TIME_ZONE,
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
   }).format(date);
 }
 
@@ -799,6 +809,7 @@ export default async function Home() {
     shippingRatesResult,
     liveOrdersResult,
     liveMetaResult,
+    stockSummariesResult,
   ] = await Promise.allSettled([
     prisma.syncLog.findFirst({
       where: {
@@ -872,6 +883,7 @@ export default async function Home() {
     }),
     getTodayShopifyOrders(),
     getMetaSnapshot(),
+    getStockSummaries(),
   ]);
 
   const lastSyncValue = lastSync.status === "fulfilled" ? lastSync.value : null;
@@ -943,6 +955,13 @@ export default async function Home() {
         ? liveMetaResult.reason.message
         : "Unknown Meta error";
   }
+
+  const stockSummaries =
+    stockSummariesResult.status === "fulfilled" ? stockSummariesResult.value : [];
+
+  const stockAlerts = stockSummaries.filter(
+    (summary) => summary.status === "reorder-now" || summary.status === "reorder-soon",
+  );
 
   const previous6DayKeys = buildPreviousDateKeySet(6);
   const previous29DayKeys = buildPreviousDateKeySet(29);
@@ -1229,6 +1248,49 @@ export default async function Home() {
               </div>
             </div>
 
+            {stockAlerts.length > 0 ? (
+              <div className="flex w-full flex-col gap-2 lg:w-[300px] lg:min-w-[300px] lg:max-w-[300px] lg:flex-none">
+                {stockAlerts.map((alert) => (
+                  <div
+                    key={alert.itemKey}
+                    className="rounded-2xl border border-zinc-800 bg-zinc-900/90 p-4"
+                  >
+                    <div
+                      className={`flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] ${
+                        alert.status === "reorder-now"
+                          ? "text-rose-400"
+                          : "text-amber-400"
+                      }`}
+                    >
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          alert.status === "reorder-now"
+                            ? "bg-rose-500"
+                            : "bg-amber-500"
+                        }`}
+                      />
+                      {alert.status === "reorder-now" ? "Reorder now" : "Reorder soon"}
+                    </div>
+                    <div className="mt-2 text-sm text-zinc-300">
+                      <span className="font-semibold text-white">
+                        {alert.itemName}
+                      </span>{" "}
+                      — ~{Math.round(alert.daysOfStockLeft ?? 0)}d left
+                      {alert.orderByDate
+                        ? `, order by ${formatShortDate(alert.orderByDate)}`
+                        : ""}
+                    </div>
+                    <a
+                      href="/fsh/stock"
+                      className="mt-1 inline-block text-xs text-zinc-500 underline hover:text-white"
+                    >
+                      View details
+                    </a>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
             <div className="flex w-full flex-col gap-4 lg:w-[320px] lg:min-w-[320px] lg:max-w-[320px] lg:flex-none">
               <div className="flex flex-col items-start gap-2 lg:items-end">
                 <div className="flex flex-wrap items-center gap-2">
@@ -1244,6 +1306,13 @@ export default async function Home() {
                     className="rounded-xl border border-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:border-zinc-600 hover:text-white"
                   >
                     Shipping
+                  </a>
+
+                  <a
+                    href="/fsh/stock"
+                    className="rounded-xl border border-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:border-zinc-600 hover:text-white"
+                  >
+                    Stock
                   </a>
 
                   <SyncButton />

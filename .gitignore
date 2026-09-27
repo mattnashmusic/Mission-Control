@@ -41,3 +41,8 @@ yarn-error.log*
 next-env.d.ts
 
 /lib/generated/prisma
+
+# local deploy artifacts / scratch
+/deploy_*.jsonl
+/*.patch
+/.q.cjs

@@ -247,3 +247,27 @@ model ShippingCostEntry {
   @@index([countryCode])
   @@index([effectiveFrom])
 }
+
+model StockCountEntry {
+  id        String   @id @default(cuid())
+  itemKey   String
+  itemName  String
+  quantity  Int
+  countedAt DateTime
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([itemKey])
+  @@index([countedAt])
+}
+
+model ReorderSetting {
+  itemKey        String   @id
+  itemName       String
+  productionDays Int      @default(14)
+  shippingDays   Int      @default(7)
+  bufferDays     Int      @default(14)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
