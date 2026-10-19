@@ -136,6 +136,19 @@ test("missing show-level ticket history produces no momentum or forecast", () =>
   );
 });
 
+test("sold-out show keeps a full forecast with no recent ticket history", () => {
+  const momentum = calculateShowWeeklyMomentum([], today);
+  const forecast = calculateForecastTickets({
+    currentTickets: 400,
+    capacity: 400,
+    weeklyMomentum: momentum,
+    showDate: "2026-09-14",
+    today,
+  });
+  assert.equal(forecast, 400);
+  assert.equal(calculateOutlook(forecast, 400), "green");
+});
+
 function projectedSpend(overrides: Partial<Parameters<typeof calculateProjectedSpend>[0]> = {}) {
   return calculateProjectedSpend({
     currentSpend: 100,
