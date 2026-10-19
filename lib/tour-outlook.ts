@@ -62,7 +62,11 @@ export function calculateForecastTickets({
   showDate: string;
   today: Date;
 }): number | null {
-  if (capacity === null || capacity <= 0 || weeklyMomentum === null) return null;
+  if (capacity === null || capacity <= 0) return null;
+  // A sold-out show needs no momentum to forecast: it stays at capacity even
+  // after its last sale drops out of the 28-day momentum window.
+  if (currentTickets >= capacity) return capacity;
+  if (weeklyMomentum === null) return null;
   const daysRemaining = calculateDaysUntilShow(showDate, today);
   if (daysRemaining === 0) return Math.min(currentTickets, capacity);
 
