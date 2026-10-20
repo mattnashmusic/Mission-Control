@@ -225,6 +225,9 @@ model SavedAudience {
   lng       Float
   radiusKm  Int
   showId    String?
+  // Hand-drawn include/exclude areas and per-city toggles on top of the
+  // radius: { shapes: [...], includeKeys: [...], excludeKeys: [...] }.
+  refinements Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
