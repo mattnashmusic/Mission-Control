@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 type CreateBody = {
@@ -9,6 +10,7 @@ type CreateBody = {
   lng?: number;
   radiusKm?: number;
   showId?: string | null;
+  refinements?: unknown;
 };
 
 type DeleteBody = {
@@ -39,6 +41,7 @@ export async function POST(request: Request) {
     const lng = Number(body.lng);
     const radiusKm = Number(body.radiusKm);
     const showId = body.showId?.trim() || null;
+    const refinements = sanitizeRefinements(body.refinements);
 
     if (!name) {
       return NextResponse.json({ error: "Name is required." }, { status: 400 });
@@ -54,7 +57,16 @@ export async function POST(request: Request) {
     }
 
     const audience = await prisma.savedAudience.create({
-      data: { name, city, country, lat, lng, radiusKm, showId },
+      data: {
+        name,
+        city,
+        country,
+        lat,
+        lng,
+        radiusKm,
+        showId,
+        refinements: refinements ?? Prisma.DbNull,
+      },
     });
 
     return NextResponse.json({ audience });
@@ -79,4 +91,49 @@ export async function DELETE(request: Request) {
     const message = error instanceof Error ? error.message : "Failed to delete audience";
     return new NextResponse(message, { status: 500 });
   }
+}
+
+// Only keep the shape of data the map understands, and cap sizes so a
+// runaway lasso can't bloat the row.
+function sanitizeRefinements(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  const input = value as Record<string, unknown>;
+
+  const shapes = Array.isArray(input.shapes)
+    ? input.shapes
+        .slice(0, 50)
+        .map((raw) => {
+          const shape = raw as Record<string, unknown>;
+          const mode = shape.mode === "exclude" ? "exclude" : "include";
+          const coordinates = Array.isArray(shape.coordinates)
+            ? shape.coordinates
+                .slice(0, 2000)
+                .filter(
+                  (pair): pair is [number, number] =>
+                    Array.isArray(pair) &&
+                    pair.length === 2 &&
+                    Number.isFinite(pair[0]) &&
+                    Number.isFinite(pair[1])
+                )
+            : [];
+          return {
+            id: String(shape.id ?? "").slice(0, 64) || `shape-${Math.random().toString(36).slice(2)}`,
+            mode,
+            label: typeof shape.label === "string" ? shape.label.slice(0, 80) : undefined,
+            coordinates,
+          };
+        })
+        .filter((shape) => shape.coordinates.length >= 3)
+    : [];
+
+  const keys = (list: unknown) =>
+    Array.isArray(list)
+      ? list.filter((k): k is string => typeof k === "string").slice(0, 2000).map((k) => k.slice(0, 200))
+      : [];
+
+  const includeKeys = keys(input.includeKeys);
+  const excludeKeys = keys(input.excludeKeys);
+
+  if (shapes.length === 0 && includeKeys.length === 0 && excludeKeys.length === 0) return null;
+  return { shapes, includeKeys, excludeKeys };
 }

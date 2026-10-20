@@ -2,7 +2,16 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import FanMap from "@/components/email/FanMap";
-import { getAudienceInRadius, type CityCluster } from "@/lib/email/audience";
+import {
+  EMPTY_REFINEMENTS,
+  clusterKey,
+  getAudienceInRadius,
+  getAudienceSelection,
+  hasRefinements,
+  type AudienceRefinements,
+  type CityCluster,
+  type ShapeMode,
+} from "@/lib/email/audience";
 import {
   getSavedAudiences,
   saveAudience,
@@ -92,6 +101,10 @@ export default function EmailPage() {
   const [savedAudiences, setSavedAudiences] = useState<SavedAudience[]>([]);
   const [savedLoading, setSavedLoading] = useState(true);
   const [savingAudience, setSavingAudience] = useState(false);
+
+  // Hand-drawn areas and per-city toggles layered on top of the radius.
+  const [refinements, setRefinements] = useState<AudienceRefinements>(EMPTY_REFINEMENTS);
+  const [drawMode, setDrawMode] = useState<ShapeMode | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -241,8 +254,16 @@ export default function EmailPage() {
   const summary = useMemo(() => getAudienceSummaryFromClusters(cityClusters), [cityClusters]);
 
   const radiusResult = useMemo(() => {
-    return getAudienceInRadius(cityClusters, location.lat, location.lng, radiusKm);
-  }, [cityClusters, location.lat, location.lng, radiusKm]);
+    return getAudienceSelection(
+      cityClusters,
+      location.lat,
+      location.lng,
+      radiusKm,
+      refinements
+    );
+  }, [cityClusters, location.lat, location.lng, radiusKm, refinements]);
+
+  const isRefined = hasRefinements(refinements);
 
   const topSelectedCities = radiusResult.clusters.slice(0, 8);
 
@@ -267,7 +288,64 @@ export default function EmailPage() {
     return map;
   }, [upcomingShows, cityClusters, radiusKm]);
 
+  function resetRefinements() {
+    setRefinements(EMPTY_REFINEMENTS);
+    setDrawMode(null);
+  }
+
+  function handleShapeDrawn(coordinates: [number, number][]) {
+    if (!drawMode) return;
+    const mode = drawMode;
+    setRefinements((prev) => {
+      const sameModeCount = prev.shapes.filter((shape) => shape.mode === mode).length;
+      return {
+        ...prev,
+        shapes: [
+          ...prev.shapes,
+          {
+            id: `shape-${Date.now()}`,
+            mode,
+            label: `${mode === "include" ? "Added" : "Excluded"} area ${sameModeCount + 1}`,
+            coordinates,
+          },
+        ],
+      };
+    });
+    // One shape per click keeps panning available between drawings.
+    setDrawMode(null);
+  }
+
+  function removeShape(id: string) {
+    setRefinements((prev) => ({
+      ...prev,
+      shapes: prev.shapes.filter((shape) => shape.id !== id),
+    }));
+  }
+
+  function handleToggleCluster(key: string, shouldBeIncluded: boolean) {
+    setRefinements((prev) => {
+      const includeKeys = prev.includeKeys.filter((k) => k !== key);
+      const excludeKeys = prev.excludeKeys.filter((k) => k !== key);
+
+      // Work out what the city would be without a manual toggle; only store
+      // an override when it actually changes the outcome.
+      const baseline = getAudienceSelection(
+        cityClusters,
+        location.lat,
+        location.lng,
+        radiusKm,
+        { shapes: prev.shapes, includeKeys, excludeKeys }
+      ).selectedKeys.has(key);
+
+      if (shouldBeIncluded && !baseline) includeKeys.push(key);
+      if (!shouldBeIncluded && baseline) excludeKeys.push(key);
+
+      return { ...prev, includeKeys, excludeKeys };
+    });
+  }
+
   function selectShow(show: UpcomingShow) {
+    resetRefinements();
     setSelectedShowId(show.id);
     setLocation({
       lat: show.lat,
@@ -282,6 +360,7 @@ export default function EmailPage() {
   }
 
   function selectSearchMatch(match: GeocodeMatch) {
+    resetRefinements();
     setSelectedShowId(null);
     setLocation({
       lat: match.lat,
@@ -309,7 +388,7 @@ export default function EmailPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          name: `${location.label} ${radiusKm}km`,
+          name: `${location.label} ${radiusKm}km${isRefined ? " + custom" : ""}`,
           emails,
         }),
       });
@@ -335,13 +414,14 @@ export default function EmailPage() {
       setSavingAudience(true);
 
       const created = await saveAudience({
-        name: `${location.label} ${radiusKm}km`,
+        name: `${location.label} ${radiusKm}km${isRefined ? " + custom" : ""}`,
         city: location.city,
         country: location.country,
         lat: location.lat,
         lng: location.lng,
         radiusKm,
         showId: selectedShowId,
+        refinements: isRefined ? refinements : null,
       });
 
       setSavedAudiences((prev) => [created, ...prev]);
@@ -362,6 +442,16 @@ export default function EmailPage() {
       country: audience.country,
     });
     setRadiusKm(audience.radiusKm);
+    setDrawMode(null);
+    setRefinements(
+      audience.refinements
+        ? {
+            shapes: audience.refinements.shapes ?? [],
+            includeKeys: audience.refinements.includeKeys ?? [],
+            excludeKeys: audience.refinements.excludeKeys ?? [],
+          }
+        : EMPTY_REFINEMENTS
+    );
   }
 
   async function handleDeleteAudience(id: string) {
@@ -535,13 +625,24 @@ export default function EmailPage() {
             </div>
           ) : (
             <>
+              <RefineToolbar
+                drawMode={drawMode}
+                onDrawModeChange={setDrawMode}
+                refinements={refinements}
+                onRemoveShape={removeShape}
+                onClear={resetRefinements}
+              />
+
               <FanMap
                 cityClusters={cityClusters}
                 center={location}
                 radiusKm={radiusKm}
-                highlightedKeys={radiusResult.clusters.map(
-                  (cluster) => `${cluster.city}-${cluster.country}`
-                )}
+                selectedKeys={radiusResult.selectedKeys}
+                excludedKeys={radiusResult.excludedKeys}
+                shapes={refinements.shapes}
+                drawMode={drawMode}
+                onShapeDrawn={handleShapeDrawn}
+                onToggleCluster={handleToggleCluster}
               />
 
               <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)_300px]">
@@ -553,14 +654,31 @@ export default function EmailPage() {
                     {radiusResult.totalContacts}
                   </p>
                   <p className="mt-2 text-sm text-gray-400">
-                    contacts within {radiusKm} km of {location.label}
+                    {isRefined
+                      ? `custom area around ${location.label}`
+                      : `contacts within ${radiusKm} km of ${location.label}`}
                   </p>
+                  {isRefined && (
+                    <div className="mt-3 space-y-1 text-xs text-gray-500">
+                      <p>{radiusResult.radiusContacts.toLocaleString()} in {radiusKm} km radius</p>
+                      {radiusResult.addedContacts > 0 && (
+                        <p className="text-[#f0c94c]">
+                          + {radiusResult.addedContacts.toLocaleString()} from added areas
+                        </p>
+                      )}
+                      {radiusResult.excludedContacts > 0 && (
+                        <p className="text-red-400">
+                          − {radiusResult.excludedContacts.toLocaleString()} excluded
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </InfoCard>
 
                 <InfoCard>
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-xs uppercase tracking-wide text-gray-500">
-                      Cities in Radius
+                      {isRefined ? "Cities in Audience" : "Cities in Radius"}
                     </p>
                     <p className="text-xs text-gray-500">
                       {radiusResult.clusters.length} cities
@@ -576,8 +694,12 @@ export default function EmailPage() {
                       <div className="mt-4 flex flex-wrap gap-2">
                         {topSelectedCities.map((cluster) => (
                           <div
-                            key={`${cluster.city}-${cluster.country}`}
-                            className="rounded-full border border-[#4a3d12] bg-[#2b2208] px-3 py-1.5 text-xs font-medium text-[#f0c94c]"
+                            key={clusterKey(cluster)}
+                            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+                              cluster.source === "radius"
+                                ? "border-[#4a3d12] bg-[#2b2208] text-[#f0c94c]"
+                                : "border-dashed border-[#f0c94c] bg-transparent text-[#f0c94c]"
+                            }`}
                           >
                             {cluster.city} ({cluster.count})
                           </div>
@@ -598,10 +720,11 @@ export default function EmailPage() {
                     Action
                   </p>
                   <p className="mt-3 text-sm text-gray-300">
-                    Create a MailerLite group from this radius selection.
+                    Create a MailerLite group from this {isRefined ? "custom" : "radius"} selection.
                   </p>
                   <p className="mt-2 text-xs text-gray-500">
-                    {location.label} · {radiusKm} km · {radiusResult.totalContacts} contacts
+                    {location.label} · {radiusKm} km{isRefined ? " + custom" : ""} ·{" "}
+                    {radiusResult.totalContacts} contacts
                   </p>
                   <p className="mt-1 text-xs text-gray-600">
                     {mailerLiteCount} subscribed (will be emailed)
@@ -659,6 +782,7 @@ export default function EmailPage() {
                   <p className="font-medium text-white">{audience.name}</p>
                   <p className="mt-1 text-xs text-gray-500">
                     {audience.city} · {audience.radiusKm} km
+                    {audience.refinements ? " · custom areas" : ""}
                   </p>
                 </div>
 
@@ -726,6 +850,87 @@ export default function EmailPage() {
           ))}
         </div>
       </section>
+    </div>
+  );
+}
+
+function RefineToolbar({
+  drawMode,
+  onDrawModeChange,
+  refinements,
+  onRemoveShape,
+  onClear,
+}: {
+  drawMode: ShapeMode | null;
+  onDrawModeChange: (mode: ShapeMode | null) => void;
+  refinements: AudienceRefinements;
+  onRemoveShape: (id: string) => void;
+  onClear: () => void;
+}) {
+  const manualCount = refinements.includeKeys.length + refinements.excludeKeys.length;
+  const hasAny = refinements.shapes.length > 0 || manualCount > 0;
+
+  const modeButton = (mode: ShapeMode, label: string) => {
+    const active = drawMode === mode;
+    const activeClass =
+      mode === "include"
+        ? "border-[#f0c94c] bg-[#2b2208] text-[#f0c94c]"
+        : "border-red-500 bg-[#2a0f0f] text-red-300";
+    return (
+      <button
+        onClick={() => onDrawModeChange(active ? null : mode)}
+        className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+          active ? activeClass : "border-[#343434] bg-[#161616] text-gray-300 hover:border-[#4a4a4a]"
+        }`}
+      >
+        {active ? "Drawing… (click to cancel)" : label}
+      </button>
+    );
+  };
+
+  return (
+    <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-wrap items-center gap-2">
+        {modeButton("include", "+ Draw area to add")}
+        {modeButton("exclude", "− Draw area to exclude")}
+        <span className="text-xs text-gray-500">
+          {drawMode
+            ? "Click and drag on the map to lasso an area."
+            : "Or click any city to add or remove it."}
+        </span>
+      </div>
+
+      {hasAny && (
+        <div className="flex flex-wrap items-center gap-2">
+          {refinements.shapes.map((shape) => (
+            <span
+              key={shape.id}
+              className={`inline-flex items-center gap-1.5 rounded-full border border-dashed px-2.5 py-1 text-xs ${
+                shape.mode === "include"
+                  ? "border-[#f0c94c] text-[#f0c94c]"
+                  : "border-red-500 text-red-300"
+              }`}
+            >
+              {shape.label ?? (shape.mode === "include" ? "Added area" : "Excluded area")}
+              <button
+                onClick={() => onRemoveShape(shape.id)}
+                className="text-gray-400 hover:text-white"
+                aria-label="Remove area"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          {manualCount > 0 && (
+            <span className="rounded-full border border-[#343434] px-2.5 py-1 text-xs text-gray-400">
+              {manualCount} cit{manualCount === 1 ? "y" : "ies"} toggled
+            </span>
+          )}
+          <button onClick={onClear} className="text-xs font-medium text-gray-400 hover:text-white">
+            Reset to radius
+          </button>
+        </div>
+      )}
     </div>
   );
 }

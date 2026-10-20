@@ -2,6 +2,8 @@
 // so they persist across devices and browsers instead of disappearing
 // whenever local storage gets cleared.
 
+import type { AudienceRefinements } from "@/lib/email/audience";
+
 export type SavedAudience = {
   id: string;
   name: string;
@@ -11,6 +13,7 @@ export type SavedAudience = {
   lng: number;
   radiusKm: number;
   showId: string | null;
+  refinements: Partial<AudienceRefinements> | null;
   createdAt: string;
 };
 
@@ -22,6 +25,7 @@ export type NewSavedAudience = {
   lng: number;
   radiusKm: number;
   showId?: string | null;
+  refinements?: AudienceRefinements | null;
 };
 
 export async function getSavedAudiences(): Promise<SavedAudience[]> {
