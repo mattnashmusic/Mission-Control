@@ -85,14 +85,42 @@ export function buildEstimatedDailyTicketSales(
   return points;
 }
 
-export function getMostRecentMondayDate() {
+export function getAmsterdamTodayDate() {
   const amsterdamDate = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Europe/Amsterdam",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
-  const date = parseDateKey(amsterdamDate);
+  return parseDateKey(amsterdamDate);
+}
+
+export function toDateKey(date: Date) {
+  return dateKey(date);
+}
+
+// Parses a "YYYY-MM-DD" snapshot date. Returns null if the value is malformed,
+// before the campaign start, or later than tomorrow (Amsterdam) — tomorrow is
+// allowed so a late-evening count can cover today's sales in full.
+export function parseSnapshotDateInput(value: unknown): Date | null {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
+  }
+  const date = parseDateKey(value);
+  if (Number.isNaN(date.getTime()) || dateKey(date) !== value) return null;
+
+  const earliest = parseDateKey(MANUAL_TICKET_CAMPAIGN_START_DATE);
+  const latest = getAmsterdamTodayDate();
+  latest.setUTCDate(latest.getUTCDate() + 1);
+
+  if (date.getTime() <= earliest.getTime() || date.getTime() > latest.getTime()) {
+    return null;
+  }
+  return date;
+}
+
+export function getMostRecentMondayDate() {
+  const date = getAmsterdamTodayDate();
   const dayOfWeek = date.getUTCDay();
   const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
 

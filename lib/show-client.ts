@@ -72,14 +72,15 @@ export async function removeShowMetaAdSet(id: string) {
 
 export async function saveManualTicketSnapshot(
   showId: string,
-  cumulativeTickets: number
+  cumulativeTickets: number,
+  snapshotDate?: string
 ) {
   const res = await fetch("/api/shows/ticket-snapshots", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ showId, cumulativeTickets }),
+    body: JSON.stringify({ showId, cumulativeTickets, snapshotDate }),
   });
 
   if (!res.ok) {
