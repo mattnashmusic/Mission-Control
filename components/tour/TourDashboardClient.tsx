@@ -9,7 +9,11 @@ import {
   saveShowField,
   type EditableShowField,
 } from "@/lib/show-client";
-import { NIJMEGEN_SHOW_SLUG } from "@/lib/manual-ticket-sales";
+import {
+  getMostRecentMondayDate,
+  NIJMEGEN_SHOW_SLUG,
+  toDateKey,
+} from "@/lib/manual-ticket-sales";
 import type {
   TourBudgetSource,
   TourMetaAdSetBudget,
@@ -543,7 +547,7 @@ function DailyTicketSalesChart({
             Ticket sales from 15 Jun onwards. Scroll left to view older dates.
           </p>
           <p className="mt-1 text-xs text-zinc-500">
-            Nijmegen sales are estimated evenly from cumulative Monday updates.
+            Nijmegen sales are estimated evenly between manual snapshots.
           </p>
         </div>
 
@@ -656,6 +660,10 @@ export default function TourDashboardClient({
     initialSettings.blendedCpt
   );
   const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({});
+  const [snapshotDate, setSnapshotDate] = useState<string>(() =>
+    toDateKey(getMostRecentMondayDate())
+  );
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [settingsSaveStates, setSettingsSaveStates] = useState<
     Record<EditableTourSettingField, SaveState>
   >({
@@ -882,7 +890,8 @@ export default function TourDashboardClient({
 
     try {
       setSaveStates((prev) => ({ ...prev, [key]: "saving" }));
-      await saveManualTicketSnapshot(show.id, value);
+      setSnapshotError(null);
+      await saveManualTicketSnapshot(show.id, value, snapshotDate);
       setSaveStates((prev) => ({ ...prev, [key]: "saved" }));
       router.refresh();
 
@@ -895,6 +904,9 @@ export default function TourDashboardClient({
       }, 1500);
     } catch (error) {
       console.error(error);
+      setSnapshotError(
+        error instanceof Error ? error.message : "Failed to save snapshot"
+      );
       setSaveStates((prev) => ({ ...prev, [key]: "error" }));
     }
   }
@@ -1429,7 +1441,7 @@ export default function TourDashboardClient({
                                   <label className="grid gap-2">
                                     <span className="text-sm text-zinc-400">
                                       {show.slug === NIJMEGEN_SHOW_SLUG
-                                        ? "Cumulative Tickets (Monday update)"
+                                        ? "Cumulative Tickets"
                                         : "Tickets Sold"}
                                     </span>
                                     <input
@@ -1451,6 +1463,31 @@ export default function TourDashboardClient({
                                     />
                                     {renderSaveStatus(show.id, "ticketSales")}
                                   </label>
+
+                                  {show.slug === NIJMEGEN_SHOW_SLUG && (
+                                    <label className="grid gap-2">
+                                      <span className="text-sm text-zinc-400">
+                                        Snapshot date
+                                      </span>
+                                      <input
+                                        type="date"
+                                        value={snapshotDate}
+                                        onChange={(e) => setSnapshotDate(e.target.value)}
+                                        className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-zinc-500"
+                                      />
+                                      <span className="text-xs text-zinc-500">
+                                        Set before entering the total. Sales are spread
+                                        evenly from the previous snapshot up to the day
+                                        before this date — for a late-evening count, use
+                                        tomorrow&apos;s date.
+                                      </span>
+                                      {snapshotError && (
+                                        <span className="text-xs text-red-400">
+                                          {snapshotError}
+                                        </span>
+                                      )}
+                                    </label>
+                                  )}
 
                                   <label className="grid gap-2">
                                     <span className="text-sm text-zinc-400">Capacity</span>
