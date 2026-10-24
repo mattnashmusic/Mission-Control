@@ -10,8 +10,9 @@ export type MetaSnapshot = {
   salesTrackedToday: number;
 };
 
+import { getFshCampaignIds } from "@/lib/meta-fsh-campaigns";
+
 const ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
-const CAMPAIGN_ID = process.env.META_CAMPAIGN_ID;
 
 function requireEnv(value: string | undefined, name: string) {
   if (!value) {
@@ -46,9 +47,11 @@ async function fetchMetaJson(url: string) {
   return json;
 }
 
-async function fetchCampaignSpend(datePreset: string): Promise<number> {
+async function fetchCampaignSpend(
+  campaignId: string,
+  datePreset: string,
+): Promise<number> {
   const accessToken = requireEnv(ACCESS_TOKEN, "META_ACCESS_TOKEN");
-  const campaignId = requireEnv(CAMPAIGN_ID, "META_CAMPAIGN_ID");
 
   const url =
     `https://graph.facebook.com/v25.0/${campaignId}/insights` +
@@ -60,26 +63,38 @@ async function fetchCampaignSpend(datePreset: string): Promise<number> {
   return spend ? Number(spend) : 0;
 }
 
-async function fetchCampaignDailyBudget(): Promise<number> {
+async function fetchCampaignDailyBudget(campaignId: string): Promise<number> {
   const accessToken = requireEnv(ACCESS_TOKEN, "META_ACCESS_TOKEN");
-  const campaignId = requireEnv(CAMPAIGN_ID, "META_CAMPAIGN_ID");
 
   const url =
     `https://graph.facebook.com/v25.0/${campaignId}` +
-    `?fields=daily_budget&access_token=${accessToken}`;
+    `?fields=daily_budget,effective_status,adsets{daily_budget,effective_status}` +
+    `&access_token=${accessToken}`;
 
   const json = await fetchMetaJson(url);
 
-  return json.daily_budget ? Number(json.daily_budget) / 100 : 0;
+  if (json.effective_status && json.effective_status !== "ACTIVE") return 0;
+
+  // Campaign budget (CBO) if set, otherwise sum active ad set budgets (ABO).
+  if (json.daily_budget) return Number(json.daily_budget) / 100;
+
+  const adsets: Array<{ daily_budget?: string; effective_status?: string }> =
+    json.adsets?.data ?? [];
+
+  return adsets
+    .filter((a) => a.effective_status === "ACTIVE" && a.daily_budget)
+    .reduce((sum, a) => sum + Number(a.daily_budget) / 100, 0);
 }
 
-async function fetchCampaignSalesTrackedToday(): Promise<number> {
+async function fetchCampaignPurchases(
+  campaignId: string,
+  datePreset: string,
+): Promise<number> {
   const accessToken = requireEnv(ACCESS_TOKEN, "META_ACCESS_TOKEN");
-  const campaignId = requireEnv(CAMPAIGN_ID, "META_CAMPAIGN_ID");
 
   const url =
     `https://graph.facebook.com/v25.0/${campaignId}/insights` +
-    `?fields=actions&date_preset=today&access_token=${accessToken}`;
+    `?fields=actions&date_preset=${datePreset}&access_token=${accessToken}`;
 
   const json = await fetchMetaJson(url);
 
@@ -101,6 +116,21 @@ async function fetchCampaignSalesTrackedToday(): Promise<number> {
     : 0;
 }
 
+async function sumAcrossCampaigns(
+  fn: (campaignId: string) => Promise<number>,
+): Promise<number> {
+  const values = await Promise.all(getFshCampaignIds().map(fn));
+  return values.reduce((sum, v) => sum + v, 0);
+}
+
+export async function getMetaSpendForDatePreset(datePreset: string) {
+  return sumAcrossCampaigns((id) => fetchCampaignSpend(id, datePreset));
+}
+
+export async function getMetaPurchasesForDatePreset(datePreset: string) {
+  return sumAcrossCampaigns((id) => fetchCampaignPurchases(id, datePreset));
+}
+
 export async function getMetaSnapshot(): Promise<MetaSnapshot> {
   const [
     today,
@@ -111,13 +141,13 @@ export async function getMetaSnapshot(): Promise<MetaSnapshot> {
     dailyBudget,
     salesTrackedToday,
   ] = await Promise.all([
-    fetchCampaignSpend("today"),
-    fetchCampaignSpend("yesterday"),
-    fetchCampaignSpend("last_7d"),
-    fetchCampaignSpend("last_30d"),
-    fetchCampaignSpend("maximum"),
-    fetchCampaignDailyBudget(),
-    fetchCampaignSalesTrackedToday(),
+    getMetaSpendForDatePreset("today"),
+    getMetaSpendForDatePreset("yesterday"),
+    getMetaSpendForDatePreset("last_7d"),
+    getMetaSpendForDatePreset("last_30d"),
+    getMetaSpendForDatePreset("maximum"),
+    sumAcrossCampaigns(fetchCampaignDailyBudget),
+    getMetaPurchasesForDatePreset("today"),
   ]);
 
   return {

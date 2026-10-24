@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { backfillMetaDailyToDb } from "@/lib/meta-backfill";
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    const result = await backfillMetaDailyToDb();
+    const dryRun = new URL(request.url).searchParams.get("dryRun") === "1";
+    const result = await backfillMetaDailyToDb({ dryRun });
     return NextResponse.json(result);
   } catch (error) {
     console.error("POST /api/sync/meta/backfill failed:", error);
