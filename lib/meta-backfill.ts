@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { getFshCampaignIds } from "@/lib/meta-fsh-campaigns";
 
 const META_API_VERSION = "v25.0";
 const FSH_START_DATE = "2026-02-12";
@@ -26,15 +27,13 @@ function getMetaEnv() {
     process.env.FACEBOOK_ACCESS_TOKEN ||
     process.env.META_TOKEN;
 
-  const campaignId = process.env.META_CAMPAIGN_ID;
-
-  if (!accessToken || !campaignId) {
-    throw new Error("Missing META_ACCESS_TOKEN or META_CAMPAIGN_ID.");
+  if (!accessToken) {
+    throw new Error("Missing META_ACCESS_TOKEN.");
   }
 
   return {
     accessToken,
-    campaignId,
+    campaignIds: getFshCampaignIds(),
   };
 }
 
@@ -98,19 +97,23 @@ function buildDateRange(startDate: string, endDate: string) {
   return dates;
 }
 
-async function fetchAllMetaInsightsRows(untilDate: string) {
-  const { accessToken, campaignId } = getMetaEnv();
-
+async function fetchInsightsRows(
+  accessToken: string,
+  campaignId: string,
+  fields: string,
+  untilDate: string,
+  extraParams: Record<string, string> = {},
+) {
   const params = new URLSearchParams({
-    fields: "spend,actions",
+    fields,
     time_increment: "1",
-    action_report_time: "impression",
     time_range: JSON.stringify({
       since: FSH_START_DATE,
       until: untilDate,
     }),
     limit: "500",
     access_token: accessToken,
+    ...extraParams,
   });
 
   let url = `https://graph.facebook.com/${META_API_VERSION}/${campaignId}/insights?${params.toString()}`;
@@ -128,8 +131,7 @@ async function fetchAllMetaInsightsRows(untilDate: string) {
     }
 
     const json = (await response.json()) as MetaInsightsResponse;
-    const rows = json.data ?? [];
-    allRows.push(...rows);
+    allRows.push(...(json.data ?? []));
 
     url = json.paging?.next ?? "";
   }
@@ -137,7 +139,60 @@ async function fetchAllMetaInsightsRows(untilDate: string) {
   return allRows;
 }
 
-export async function backfillMetaDailyToDb() {
+// Spend and purchases are fetched separately. Spend is always reported by
+// delivery date; combining it with action_report_time=impression in the same
+// request returned rows with no spend field, which wrote 0 over every
+// historical day while purchases still came through.
+async function fetchDailyTotals(untilDate: string) {
+  const { accessToken, campaignIds } = getMetaEnv();
+  const totals = new Map<string, { spend: number; purchases: number }>();
+  const perCampaign: Record<string, { spend: number; purchases: number }> = {};
+
+  for (const campaignId of campaignIds) {
+    const [spendRows, actionRows] = await Promise.all([
+      fetchInsightsRows(accessToken, campaignId, "spend", untilDate),
+      fetchInsightsRows(accessToken, campaignId, "actions", untilDate, {
+        action_report_time: "impression",
+      }),
+    ]);
+
+    let campaignSpend = 0;
+    let campaignPurchases = 0;
+
+    for (const row of spendRows) {
+      const spend = Number(row.spend ?? 0);
+      const entry = totals.get(row.date_start) ?? { spend: 0, purchases: 0 };
+      entry.spend += spend;
+      totals.set(row.date_start, entry);
+      campaignSpend += spend;
+    }
+
+    for (const row of actionRows) {
+      const purchases = getPurchaseCountFromActions(row.actions);
+      const entry = totals.get(row.date_start) ?? { spend: 0, purchases: 0 };
+      entry.purchases += purchases;
+      totals.set(row.date_start, entry);
+      campaignPurchases += purchases;
+    }
+
+    // Guard: a campaign with conversions but zero total spend means the API
+    // response is wrong. Abort rather than overwrite good data with zeros.
+    if (campaignPurchases > 0 && campaignSpend === 0) {
+      throw new Error(
+        `Meta returned ${campaignPurchases} purchases but no spend for campaign ${campaignId}; refusing to overwrite saved spend.`,
+      );
+    }
+
+    perCampaign[campaignId] = {
+      spend: Math.round(campaignSpend * 100) / 100,
+      purchases: campaignPurchases,
+    };
+  }
+
+  return { totals, perCampaign };
+}
+
+export async function backfillMetaDailyToDb(options: { dryRun?: boolean } = {}) {
   const yesterdayString = getYesterdayLocalDateString();
 
   const syncLog = await prisma.syncLog.create({
@@ -167,21 +222,23 @@ export async function backfillMetaDailyToDb() {
       };
     }
 
-    const rows = await fetchAllMetaInsightsRows(yesterdayString);
+    const { totals: rowMap, perCampaign } = await fetchDailyTotals(yesterdayString);
 
-    const rowMap = new Map<
-      string,
-      {
-        spend: number;
-        purchases: number;
-      }
-    >();
-
-    for (const row of rows) {
-      rowMap.set(row.date_start, {
-        spend: Number(row.spend ?? 0),
-        purchases: getPurchaseCountFromActions(row.actions),
+    if (options.dryRun) {
+      await prisma.syncLog.update({
+        where: { id: syncLog.id },
+        data: {
+          status: "success",
+          message: `Dry run: ${JSON.stringify(perCampaign)}`,
+          finishedAt: new Date(),
+        },
       });
+
+      const recent = buildDateRange(FSH_START_DATE, yesterdayString)
+        .slice(-14)
+        .map((d) => ({ date: d, ...(rowMap.get(d) ?? { spend: 0, purchases: 0 }) }));
+
+      return { ok: true, dryRun: true, throughDate: yesterdayString, perCampaign, recent };
     }
 
     const allDates = buildDateRange(FSH_START_DATE, yesterdayString);
@@ -213,14 +270,14 @@ export async function backfillMetaDailyToDb() {
       where: { id: syncLog.id },
       data: {
         status: "success",
-        message: `Backfilled ${upserted} Meta daily rows (${rows.length} fetched from API) through ${yesterdayString}`,
+        message: `Backfilled ${upserted} Meta daily rows (${rowMap.size} days with data across ${Object.keys(perCampaign).length} campaigns) through ${yesterdayString}`,
         finishedAt: new Date(),
       },
     });
 
     return {
       ok: true,
-      rowsFetchedFromApi: rows.length,
+      perCampaign,
       totalDaysCovered: allDates.length,
       rowsUpserted: upserted,
       throughDate: yesterdayString,
