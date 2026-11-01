@@ -11,13 +11,30 @@ import { prisma } from "@/lib/prisma";
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
-// Daily scheduled sync (see vercel.json). Self-healing:
+// Nightly scheduled sync (see vercel.json). Self-healing:
 // - Shopify orders/customers look back to the last successful sync, so
 //   missed days get filled in automatically.
 // - Meta re-pulls final daily totals for every completed day, then today.
+// vercel.json schedules this at 21:59 and 22:59 UTC with ?ams=23 so it runs
+// at 23:59 Amsterdam time year-round (CET and CEST); the other slot skips.
+function amsterdamHour() {
+  return Number(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Amsterdam",
+      hour: "2-digit",
+      hour12: false,
+    }).format(new Date())
+  );
+}
+
 export async function GET(request: Request) {
   if (!isAuthorizedCron(request)) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  const requiredHour = new URL(request.url).searchParams.get("ams");
+  if (requiredHour !== null && amsterdamHour() !== Number(requiredHour)) {
+    return NextResponse.json({ ok: true, skipped: "not 23:xx in Amsterdam" });
   }
 
   const startedAt = new Date();
