@@ -7,6 +7,9 @@ import {
   syncShopifyCustomersToDb,
 } from "@/lib/shopify-sync";
 import { syncMetaDailyToDb } from "@/lib/meta-sync";
+import { getSelfHealingDaysBack } from "@/lib/sync-window";
+
+export const maxDuration = 300;
 
 async function timedStep<T>(label: string, fn: () => Promise<T>): Promise<T> {
   const startedAt = Date.now();
@@ -31,10 +34,13 @@ export async function POST() {
   console.log("[SYNC PERF] /api/sync/all POST start");
 
   try {
+    // Look back to the last successful sync so missed days get filled in.
+    const daysBack = await getSelfHealingDaysBack();
+
     const [shopifyOrdersResult, shopifyCustomersResult, metaResult] =
       await Promise.all([
-        timedStep("syncShopifyOrdersToDb", () => syncShopifyOrdersToDb(2)),
-        timedStep("syncShopifyCustomersToDb", () => syncShopifyCustomersToDb(2)),
+        timedStep("syncShopifyOrdersToDb", () => syncShopifyOrdersToDb(daysBack)),
+        timedStep("syncShopifyCustomersToDb", () => syncShopifyCustomersToDb(daysBack)),
         timedStep("syncMetaDailyToDb", () => syncMetaDailyToDb()),
       ]);
 

@@ -1,8 +1,16 @@
 import { NextResponse } from "next/server";
 import { backfillMetaDailyToDb } from "@/lib/meta-backfill";
 import { prisma } from "@/lib/prisma";
+import { isAuthorizedCron } from "@/lib/sync-window";
 
-export async function GET() {
+export const maxDuration = 300;
+export const dynamic = "force-dynamic";
+
+export async function GET(request: Request) {
+  if (!isAuthorizedCron(request)) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
   const startedAt = new Date();
 
   try {
