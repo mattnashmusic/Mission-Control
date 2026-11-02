@@ -1147,9 +1147,15 @@ export default function TourDashboardClient({
                         </td>
                         <td className="px-4 py-4 text-right">{percent(percentSold)}</td>
                         <td className="whitespace-nowrap px-4 py-4 text-right">
-                          {forecastTickets === null || forecastPercent === null
-                            ? "—"
-                            : `${forecastTickets} - ${Math.round(forecastPercent)}%`}
+                          {capacity !== null && show.ticketSales >= capacity ? (
+                            <span className="font-semibold text-red-500">
+                              Sold Out!
+                            </span>
+                          ) : forecastTickets === null || forecastPercent === null ? (
+                            "—"
+                          ) : (
+                            `${forecastTickets} - ${Math.round(forecastPercent)}%`
+                          )}
                         </td>
                         <td className="px-4 py-4 text-right">
                           <OutlookBadge
