@@ -53,6 +53,8 @@ async function pushToMailerLite(data: {
   city: string;
   country: string;
   source: string;
+  inferredCity: string;
+  inferredCountry: string;
 }) {
   const apiKey = process.env.MAILERLITE_API_KEY;
   const groupId = process.env.MAILERLITE_REBIRTH_P2_GROUP_ID;
@@ -80,6 +82,8 @@ async function pushToMailerLite(data: {
           registration_city: data.city,
           registration_country: data.country,
           registration_source: data.source,
+          registration_inferred_city: data.inferredCity,
+          registration_inferred_country: data.inferredCountry,
         },
         groups: [groupId],
         status: "active",
@@ -111,6 +115,8 @@ export async function POST(req: NextRequest) {
     const city = clean(body.selectedCity, 100);
     const country = clean(body.selectedCountry, 10);
     const source = clean(body.source, 100);
+    const inferredCity = clean(body.inferredCity, 100);
+    const inferredCountry = clean(body.inferredCountry, 10);
 
     if (!name || !email || !email.includes("@")) {
       return NextResponse.json(
@@ -133,8 +139,8 @@ export async function POST(req: NextRequest) {
         city,
         country,
         source,
-        inferredCity: clean(body.inferredCity, 100) || null,
-        inferredCountry: clean(body.inferredCountry, 10) || null,
+        inferredCity: inferredCity || null,
+        inferredCountry: inferredCountry || null,
         eventId: clean(body.eventId, 200) || null,
         ipAddress: getClientIp(req),
         userAgent:
@@ -149,7 +155,15 @@ export async function POST(req: NextRequest) {
     let mailerlite: { status: string; error: string | null };
 
     try {
-      mailerlite = await pushToMailerLite({ name, email, city, country, source });
+      mailerlite = await pushToMailerLite({
+        name,
+        email,
+        city,
+        country,
+        source,
+        inferredCity,
+        inferredCountry,
+      });
     } catch (error) {
       mailerlite = {
         status: "error",
