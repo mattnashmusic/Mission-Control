@@ -268,6 +268,7 @@ export default async function Home() {
   let orders: DbDashboardOrder[] = [];
   let customers: DbDashboardCustomer[] = [];
   let tourVotes: DbTourVote[] = [];
+  let part2Registrations: DbTourVote[] = [];
   let metaSpendToday = 0;
 
   try {
@@ -326,6 +327,24 @@ export default async function Home() {
     }));
   } catch {
     tourVotes = [];
+  }
+
+  try {
+    const dbRegistrations = await prisma.tourRegistration.findMany({
+      select: {
+        id: true,
+        createdAt: true,
+        city: true,
+      },
+    });
+
+    part2Registrations = dbRegistrations.map((registration) => ({
+      id: registration.id,
+      createdAt: registration.createdAt.toISOString(),
+      selectedCity: registration.city,
+    }));
+  } catch {
+    part2Registrations = [];
   }
 
   try {
@@ -389,6 +408,13 @@ export default async function Home() {
   ).length;
   const totalTourVotes = tourVotes.length;
   const topTourVoteCity = getTopCity(tourVotes);
+
+  const part2RegistrationsToday = filterTourVotesByDateKeys(
+    part2Registrations,
+    buildRecentDateKeySet(1)
+  ).length;
+  const totalPart2Registrations = part2Registrations.length;
+  const topPart2City = getTopCity(part2Registrations);
 
   const now = new Date();
   const upcomingShowSummaries = showTicketSummaries.filter(
@@ -525,6 +551,31 @@ export default async function Home() {
               {
                 label: "Meta Spend Today",
                 value: money(metaSpendToday),
+              },
+            ]}
+          />
+
+          <HubCard
+            href="/rebirth-part-2-registrations"
+            emoji="🎟️"
+            title="Rebirth Part 2 Registrations"
+            subtitle="May 2027 City Registrations"
+            stats={[
+              {
+                label: "Total Signups",
+                value: String(totalPart2Registrations),
+              },
+              {
+                label: "Today",
+                value: String(part2RegistrationsToday),
+              },
+              {
+                label: "Top City",
+                value: topPart2City,
+              },
+              {
+                label: "Cities",
+                value: "13",
               },
             ]}
           />
