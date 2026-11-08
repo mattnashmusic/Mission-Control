@@ -19,6 +19,8 @@ export const COUNTRY_NAME_TO_CODE: Record<string, string> = {
   austria: "AT",
   belgium: "BE",
   canada: "CA",
+  czechia: "CZ",
+  "czech republic": "CZ",
   france: "FR",
   germany: "DE",
   ireland: "IE",

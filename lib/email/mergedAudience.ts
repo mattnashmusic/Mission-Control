@@ -108,6 +108,7 @@ export async function fetchMailerLiteActiveSubscribers(): Promise<AudienceRow[]>
           ...groupNames,
           readFirstString(
             fields.tour_vote_source,
+            fields.registration_source,
             fields.signup_source,
             fields.source,
             fields.Source
@@ -123,6 +124,8 @@ export async function fetchMailerLiteActiveSubscribers(): Promise<AudienceRow[]>
           fields.Town,
           fields.tour_vote_city,
           fields.tour_vote_inferred_city,
+          fields.registration_city,
+          fields.registration_inferred_city,
           inferredLocation.city
         )
       );
@@ -135,6 +138,8 @@ export async function fetchMailerLiteActiveSubscribers(): Promise<AudienceRow[]>
           fields.Location,
           fields.tour_vote_country,
           fields.tour_vote_inferred_country,
+          fields.registration_country,
+          fields.registration_inferred_country,
           inferredLocation.country
         )
       );
@@ -302,6 +307,8 @@ function normalizeCountry(value: string | null | undefined) {
   if (lower === "be") return "Belgium";
   if (lower === "fr") return "France";
   if (lower === "ch") return "Switzerland";
+  if (lower === "at") return "Austria";
+  if (lower === "cz" || lower === "czech republic") return "Czechia";
   if (lower === "uk" || lower === "gb") return "United Kingdom";
   if (lower === "us" || lower === "usa") return "United States";
 
