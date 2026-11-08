@@ -71,11 +71,7 @@ function voteMatchesCampaign(
   vote: RegistrationRow,
   campaign: (typeof REBIRTH_PART_2_CAMPAIGNS)[number]
 ) {
-  const source = normalise(vote.source);
-
-  return campaign.matchSources.some(
-    (matchSource) => normalise(matchSource) === source
-  );
+  return normalise(vote.source) === normalise(campaign.source);
 }
 
 function KpiCard({
