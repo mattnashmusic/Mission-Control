@@ -180,6 +180,29 @@ model TourVote {
   @@index([selectedCountry])
 }
 
+model TourRegistration {
+  id               String   @id @default(cuid())
+  name             String
+  email            String
+  city             String
+  country          String
+  source           String
+  inferredCity     String?
+  inferredCountry  String?
+  eventId          String?
+  ipAddress        String?
+  userAgent        String?
+  pageUrl          String?
+  referrer         String?
+  mailerliteStatus String?
+  mailerliteError  String?
+  createdAt        DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([source])
+  @@index([email])
+}
+
 model CogsCostEntry {
   id            String   @id @default(cuid())
   itemKey       String
