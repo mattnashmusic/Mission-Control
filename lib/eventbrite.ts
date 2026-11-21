@@ -7,6 +7,7 @@ type EventbriteAttendee = {
   status?: string;
   cancelled?: boolean;
   refunded?: boolean;
+  checked_in?: boolean;
   created?: string;
   costs?: {
     base_price?: EventbriteMoney;
@@ -86,10 +87,21 @@ function getDashboardDateKey(dateTimeString: string) {
   return `${year}-${month}-${day}`;
 }
 
+// Eventbrite flips a ticket's status from "Attending" to "Checked In" when
+// it's scanned at the door. Both are sold tickets: counting only "Attending"
+// made a show's sales and daily history vanish once the show had happened.
+const SOLD_ATTENDEE_STATUSES = new Set(["attending", "checked in"]);
+
 function isValidAttendee(attendee: EventbriteAttendee) {
   if (attendee.cancelled) return false;
   if (attendee.refunded) return false;
-  if (attendee.status && attendee.status !== "Attending") return false;
+  if (attendee.checked_in) return true;
+  if (
+    attendee.status &&
+    !SOLD_ATTENDEE_STATUSES.has(attendee.status.trim().toLowerCase())
+  ) {
+    return false;
+  }
   return true;
 }
 
